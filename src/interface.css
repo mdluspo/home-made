@@ -1,0 +1,554 @@
+/* Materials and lettering for the in-world drawing kit. Layout lives in game.css. */
+.app {
+  --kit-ink: #59634d;
+  --kit-line: #7d876b;
+  --kit-paper: #f7f1de;
+  --kit-warm: #dfc384;
+  --kit-shadow: #566043;
+}
+.app button { transition: background-color .12s, color .12s, transform .12s; }
+.app button:focus-visible { outline: 2px solid #77613a; outline-offset: 4px; }
+.app .workspace.building { background-color: #eeeee2; }
+.app .sketch-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  color: #8d9b77;
+  pointer-events: none;
+  overflow: visible;
+  z-index: -1;
+}
+.sketch-contour { fill: var(--frame-paper, #faf6e6); stroke: var(--frame-ink, #8d9b77); stroke-width: 1.7px; stroke-linejoin: round; }
+.sketch-retrace { fill: none; stroke: var(--frame-ink, #8d9b77); stroke-width: .7px; opacity: .5; stroke-linecap: round; }
+.app .mode-switch button > .sketch-frame,
+.app .game-social button > .sketch-frame,
+.app .home-plaque > .sketch-frame { width: 100%; height: 100%; margin: 0; }
+
+/* A name painted on a little timber sign, with two nail heads. */
+.home-plaque {
+  --frame-paper: #e3d3ae;
+  --frame-ink: #727d5d;
+  isolation: isolate;
+  position: relative;
+  gap: 11px;
+  min-height: 67px;
+  padding: 9px 17px 10px 12px;
+  max-width: 325px;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  transform: rotate(-.65deg);
+}
+.home-plaque::before, .home-plaque::after {
+  content: '';
+  position: absolute;
+  top: 8px;
+  width: 3px;
+  height: 3px;
+  background: #7b795e;
+  border-radius: 50%;
+}
+.home-plaque::before { left: 7px; }
+.home-plaque::after { right: 7px; }
+.home-plaque:hover { background: none; }
+.home-plaque:hover .sketch-contour { fill: #ebdcb8; }
+.home-plaque > span:not(.plaque-house) { min-width: 0; }
+.home-plaque strong { color: #535f45; font-size: 25px; font-weight: 700; letter-spacing: -.8px; }
+.home-plaque small { color: #6d7459; font-size: 8px; letter-spacing: .4px; margin-top: 6px; }
+.home-plaque > svg { color: #666e51; margin-left: 3px; width: 12px; }
+.plaque-house { width: 38px; height: 40px; color: #636e50; }
+.home-plaque .plaque-house > svg { position: static; width: 38px; height: 40px; }
+.save-dot { width: 4px; height: 4px; background: #ac7941; }
+.save-dot.is-saved { background: #72864f; }
+
+/* Each mode is its own illustrated paper tab, rather than a segmented switch. */
+.hud-right { gap: 11px; }
+.game-hud .mode-switch {
+  padding: 0;
+  gap: 9px;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  align-items: flex-start;
+}
+.game-hud .mode-switch button {
+  --frame-paper: #f6f0db;
+  --frame-ink: #838b71;
+  isolation: isolate;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  width: 74px;
+  min-height: 80px;
+  padding: 7px 5px 8px;
+  color: var(--kit-ink);
+  background: none;
+  border: 0;
+  border-radius: 2px 3px 1px 2px;
+  box-shadow: none;
+  font-family: var(--hand);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+}
+.game-hud .mode-switch button:nth-child(2) { transform: rotate(1deg); margin-top: 2px; }
+.game-hud .mode-switch button:nth-child(3) { transform: rotate(-.8deg); }
+.game-hud .mode-switch button svg { width: 35px; height: 35px; }
+.game-hud .mode-switch button:hover { --frame-paper: #eee3c4; background: none; }
+.game-hud .mode-switch button.active {
+  --frame-paper: #e4cb8b;
+  --frame-ink: #687254;
+  color: #4e5c40;
+  background: none;
+  border-color: #687254;
+  box-shadow: none;
+}
+.game-hud .mode-switch button.active::after {
+  content: '';
+  position: absolute;
+  bottom: 4px;
+  left: 19px;
+  right: 16px;
+  height: 2px;
+  background: #8b7849;
+  transform: rotate(-2deg);
+}
+.hud-utilities { gap: 14px; padding-right: 3px; }
+.hud-button {
+  gap: 4px;
+  padding: 0;
+  min-height: 31px;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  color: #697657;
+  font-size: 10px;
+}
+.hud-button > svg { width: 28px; height: 28px; }
+.hud-button:hover, .hud-button.selected { background: none; color: #485638; }
+.hud-button:hover > span, .hud-button.selected > span { text-decoration: underline; text-underline-offset: 4px; }
+.hud-utilities > .icon-button {
+  width: 29px;
+  height: 29px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: #8b805a;
+}
+
+/* The original compact grouping, enclosed by a drawn green contour. */
+.app .tool-rail {
+  --frame-paper: #faf7e9;
+  --frame-ink: #8c9c75;
+  isolation: isolate;
+  padding: 8px 7px;
+  gap: 5px;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.app .tool-rail::before {
+  display: none;
+}
+.tool-group { --tool-paper: #f8f3e3; }
+.tool-group.active { --tool-paper: #dfe6ce; }
+.app .tool-rail .icon-button {
+  width: 34px;
+  height: 34px;
+  background: none;
+  color: #697358;
+  border: 1px solid transparent;
+  border-radius: 3px 5px 4px 3px;
+  box-shadow: none;
+}
+.app .tool-rail .icon-button svg { width: 21px; height: 21px; }
+.app .tool-rail .icon-button:hover { background: #e9eddc; }
+.app .tool-rail .icon-button.active, .tool-group.is-open > .icon-button {
+  background: #dfe6ce;
+  color: #526344;
+  border-color: #becba8;
+  box-shadow: none;
+}
+.app .rail-divider { height: 1px; margin: 1px 5px 2px; background: #c8d2b5; transform: rotate(-1deg); }
+.tool-group-arrow {
+  left: calc(100% + 1px);
+  border-radius: 0 2px 2px 0;
+  background: #faf7e9;
+  color: #59654a;
+  border-color: #737d61;
+}
+.tool-group-arrow:hover { background: #faf7e9; }
+
+/* Menus and panels are sheets, with ruled rows and a small binding edge. */
+.game-menu, .tool-flyout, .floor-context-menu {
+  background: #f8f2df;
+  border: 1px solid #818b70;
+  border-radius: 1px;
+  box-shadow: 3px 4px 0 #67715133;
+  backdrop-filter: none;
+  color: var(--kit-ink);
+}
+.game-menu { top: 80px; padding: 8px 10px; }
+.game-menu, .app .library-panel, .app .chat-panel, .floor-context-menu, .modal {
+  --frame-paper: #f8f2df;
+  --frame-ink: #929e7d;
+  isolation: isolate;
+}
+.game-menu button, .tool-flyout > button, .floor-context-menu > button { border-radius: 0; color: #667453; }
+.game-menu button { padding: 12px 6px; border-bottom: 1px solid #dcd9c1; }
+.game-menu button:last-child { border-bottom: 0; }
+.game-menu button:hover, .tool-flyout > button:hover, .floor-context-menu > button:hover { background: #e8e4cb; }
+.tool-flyout { padding: 10px; border-left: 4px solid #9dA780; }
+.tool-flyout-heading, .floor-context-menu > span { color: #7b795c; letter-spacing: 1px; }
+.tool-flyout > button { border-width: 0 0 1px; border-bottom-color: #e0ddc6; }
+.tool-flyout > button.chosen { background: #e9dfbc; border-color: #d0c49e; color: #526240; }
+.tool-flyout small { color: #81876e; }
+.app .library-panel {
+  top: 164px;
+  padding: 26px 20px 18px;
+  background: #f8f2df;
+  background-image: var(--noise);
+  border: 1px solid #818a6e;
+  border-left: 5px solid #a5ae8b;
+  border-radius: 1px 2px 1px 0;
+  box-shadow: 4px 5px 0 #69735430;
+  backdrop-filter: none;
+}
+.app .library-panel::before {
+  content: '';
+  position: absolute;
+  width: 65px;
+  height: 13px;
+  top: 0;
+  left: 24px;
+  transform: rotate(-3deg);
+  background: #dfcb94a3;
+}
+.app .panel-illustration { border: 0; background: none; border-radius: 0; color: #6e7e57; }
+.app .panel-heading h2 { color: #5d6e4b; }
+.app .panel-description { color: #82856b; }
+.app .catalog-count { border-radius: 0; background: none; border: 0; color: #7e8668; }
+.app .category-chips { gap: 0 8px; }
+.app .category-chips button {
+  background: none;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  padding: 6px 0;
+  color: #7c8668;
+}
+.app .category-chips button.active { background: none; border-color: #8c7950; color: #596747; }
+.app .search-field { background: #fff9e83d; border: 0; border-bottom: 1px solid #b9b99b; border-radius: 0; }
+.app .furniture-card, .app .book-piece { border: 0; border-bottom: 1px solid #d7d3b9; border-radius: 0; background: none; box-shadow: none; }
+.app .furniture-card:hover, .app .book-piece:hover { background: #ebe5cb; box-shadow: none; transform: none; }
+.app .furniture-card-art, .app .furniture-card:nth-child(2n) .furniture-card-art, .app .book-piece-art { background: none; }
+.app .furniture-name { color: #63704f; }
+.app .furniture-subtitle { color: #8b8466; }
+.app .upload-card { border: 1px dashed #9eaa84; border-radius: 1px; background: #ece9d2; }
+.app .upload-icon { border: 0; border-radius: 0; background: none; }
+.app .floor-swatch { border-radius: 0; }
+.app .floor-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px 12px; max-width: 100%; }
+.app .floor-options > button { min-width: 0; }
+.app .floor-swatch { width: 100%; height: 52px; }
+.app .wall-swatches { flex-wrap: wrap; gap: 12px; }
+.app .wall-swatches button, .app .profile-colors button { border-radius: 2px; }
+.app .build-tip, .app .explore-card, .app .selection-inspector { border-radius: 1px; background: #eeead4; }
+
+/* An unobtrusive ruler strip and two enamel game buttons. */
+.game-canvas-controls {
+  --frame-paper: #f4edd6;
+  --frame-ink: #91a07d;
+  isolation: isolate;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: none;
+  padding: 5px 9px 15px;
+}
+.game-canvas-controls::after { display: none; }
+.ruler-marks {
+  position: absolute;
+  bottom: 4px;
+  left: 10px;
+  width: calc(100% - 20px);
+  height: 9px;
+  stroke: #9b9f7f;
+  stroke-width: .7;
+  fill: none;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+.game-canvas-controls .icon-button { border-radius: 1px; color: #6e7b59; }
+.game-canvas-controls .icon-button.active { background: #e1d4a9; color: #576343; }
+.game-canvas-controls .zoom-value { color: #697656; }
+.plan-scale { color: #7d8b6c; }
+.game-social { gap: 10px; }
+.game-social > button {
+  --frame-paper: #ece0bd;
+  --frame-ink: #7c8568;
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 53px;
+  height: 62px;
+  padding: 4px 5px;
+  background: none;
+  border: 0;
+  border-radius: 2px 1px 2px 1px;
+  color: #626d50;
+  box-shadow: none;
+}
+.game-social > button:first-child { transform: rotate(-1deg); }
+.game-social > button > svg { width: 33px; height: 33px; }
+.game-social > button > span { font-family: var(--hand); font-size: 16px; font-weight: 700; line-height: 1; }
+.game-social > button:hover, .game-social > button[aria-expanded="true"] { --frame-paper: #e0ca90; background: none; }
+.app .drawing-hint, .wall-edit-panel { border-radius: 0; border: 0; border-bottom: 1px solid #bac1a5; background: #f7f3e1e6; color: #79856a; }
+.app .chat-panel { bottom: 100px; border: 1px solid #818b70; border-radius: 1px; background: #f8f2df; box-shadow: 3px 4px 0 #67715133; }
+.app .chat-header { background: #e5dfc5; }
+.app .chat-panel form, .app .chat-panel input { border-radius: 0; }
+.app .toast { border-radius: 1px; border: 1px solid #9ca581; box-shadow: 2px 3px 0 #66734e22; }
+.app .street-walk-controls > button, .app .street-enter { border-radius: 2px; background: #f2e6c6; border-color: #7d8869; box-shadow: 2px 2px #8d987733; }
+
+/* Dialogs belong to the same paper book, including fields and action buttons. */
+.modal-backdrop { background: #46503b55; backdrop-filter: blur(2px); }
+.modal { background-color: #f8f1dd; border: 2px solid #869173; border-radius: 2px; box-shadow: 6px 7px 0 #414e3933; padding-top: 30px; }
+.modal::before { inset: 7px; border: 0; border-left: 1px solid #d8ceb0; border-radius: 0; }
+.modal-flower { background: none; border-radius: 0; width: 36px; height: 36px; margin-bottom: 9px; }
+.modal h2 { color: #60734e; }
+.modal .form-label { color: #73805f; }
+.modal .form-label input, .modal .form-label select { background: #fff9e8; border: 1px solid #b0b69a; border-radius: 1px; }
+.app .button { border-radius: 2px; box-shadow: none; }
+.app .button.primary { background: #87976d; border: 1px solid #697b51; box-shadow: 1px 2px 0 #66734e; color: #fff9e9; }
+.app .button.secondary { background: #eae3c9; border-color: #b2b797; }
+.modal .toggle { width: 24px; height: 24px; border: 1px solid #a5ae8c; border-radius: 1px; padding: 3px; background: #f9f3df; }
+.modal .toggle > span { border-radius: 0; box-shadow: none; background: none; width: 15px; height: 15px; transform: none; }
+.modal .toggle.on { background: #899b70; border-color: #6e8257; }
+.modal .toggle.on > span { transform: rotate(45deg); width: 6px; height: 12px; margin: 0 0 0 5px; border: solid #fff8e2; border-width: 0 2px 2px 0; }
+.modal .visitor-notice, .modal .help-note, .modal .room-stats, .modal .sticker-preview { border-radius: 1px; }
+.game-menu, .app .library-panel, .app .chat-panel, .floor-context-menu, .modal { border: 0; background-color: transparent; box-shadow: 2px 3px 0 #71815b14; }
+
+@media (max-width: 760px) {
+  .home-plaque { min-height: 56px; max-width: 250px; padding: 8px 12px 8px 8px; gap: 6px; }
+  .home-plaque strong { font-size: 21px; max-width: 173px; }
+  .home-plaque small { font-size: 7px; }
+  .home-plaque .plaque-house, .home-plaque .plaque-house > svg { width: 30px; height: 33px; }
+  .game-hud .mode-switch { gap: 6px; padding: 0; }
+  .game-hud .mode-switch button { width: 57px; min-height: 65px; padding: 5px 3px 7px; font-size: 15px; border-radius: 1px; }
+  .game-hud .mode-switch button svg { width: 29px; height: 29px; }
+  .game-hud .mode-switch button.active::after { left: 13px; right: 12px; }
+  .hud-right { gap: 8px; }
+  .hud-utilities { gap: 10px; }
+  .hud-utilities .hud-button { padding: 0; width: auto; min-height: 27px; font-size: 9px; gap: 3px; }
+  .hud-utilities .hud-button > svg { width: 24px; height: 24px; }
+  .hud-utilities > .icon-button { width: 26px; height: 26px; }
+  .app .tool-rail { padding: 7px 6px; gap: 4px; }
+  .app .tool-rail .icon-button { width: 31px; height: 31px; }
+  .game-canvas-controls { padding: 5px 8px 14px; }
+  .app .tool-rail .icon-button svg { width: 21px; height: 21px; }
+  .app .library-panel { top: 143px; padding: 24px 15px 12px; }
+  .game-social > button { width: 43px; height: 51px; padding: 3px; }
+  .game-social > button > svg { width: 28px; height: 28px; }
+  .game-social > button > span { font-size: 14px; }
+  .app .chat-panel { bottom: 85px; }
+}
+@media (max-width: 480px) {
+  .game-hud { gap: 8px; }
+  .home-plaque { max-width: 160px; min-height: 51px; padding: 7px 10px 7px 7px; gap: 4px; }
+  .home-plaque strong { max-width: 98px; font-size: 18px; }
+  .home-plaque small { font-size: 6px; letter-spacing: 0; margin-top: 4px; }
+  .home-plaque .plaque-house, .home-plaque .plaque-house > svg { width: 24px; height: 29px; }
+  .home-plaque > svg { width: 9px; margin-left: 0; }
+  .game-hud .mode-switch { gap: 5px; }
+  .game-hud .mode-switch button { width: 48px; min-height: 58px; font-size: 13px; }
+  .game-hud .mode-switch button svg { width: 26px; height: 26px; }
+  .hud-utilities { gap: 9px; }
+  .hud-utilities .hud-button { font-size: 8px; }
+  .game-social { flex-direction: column; gap: 7px; }
+  .game-social > button { width: 39px; height: 47px; }
+  .game-social > button > svg { width: 25px; height: 25px; }
+  .app .chat-panel { bottom: 126px; }
+  .tool-flyout { min-width: 235px; left: calc(100% + 18px); }
+}
+@media (max-height: 600px) and (min-width: 650px) {
+  .home-plaque { min-height: 54px; }
+  .game-hud .mode-switch button { width: 59px; min-height: 60px; font-size: 15px; padding: 4px; }
+  .game-hud .mode-switch button svg { width: 27px; height: 27px; }
+  .app .library-panel { top: 130px; }
+  .app .tool-rail .icon-button { height: 33px; width: 33px; }
+  .game-social > button { height: 49px; width: 43px; }
+  .game-social > button > svg { height: 26px; width: 26px; }
+  .game-social > button > span { font-size: 14px; }
+}
+
+/* Work across the top; drawing tools at the left; view and social controls
+   occupy the two lower corners. Each dock has one clear purpose. */
+.game-hud { inset: 20px 22px auto; gap: 20px; }
+.hud-left { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.game-menu-trigger { --frame-paper: #f8f3e2; position: relative; isolation: isolate; display: flex; align-items: center; gap: 8px; height: 49px; padding: 8px 15px; font-family: var(--hand); font-size: 23px; color: #637450; }
+.game-menu-trigger:hover { --frame-paper: #e9e9d1; }
+.game-save-status { display: flex; align-items: center; gap: 6px; padding-left: 6px; font-size: 10px; color: #8c987b; pointer-events: none; }
+.game-menu { top: 64px; width: 238px; z-index: 5; }
+.game-menu button { font-size: 13px; padding: 13px 8px; }
+.game-hud .mode-switch { --frame-paper: #f8f3e2; position: fixed; top: 18px; left: 50%; transform: translateX(-50%); isolation: isolate; padding: 5px 7px; gap: 4px; }
+.game-hud .mode-switch button { width: 82px; min-height: 73px; font-size: 21px; gap: 3px; padding: 5px 7px 7px; }
+.game-hud .mode-switch button:nth-child(n) { transform: none; margin: 0; }
+.game-hud .mode-switch button svg { width: 34px; height: 34px; }
+.game-hud .mode-switch button.active { background: #e5d5a9; border-radius: 4px 6px 3px 5px; }
+.game-hud .mode-switch button:hover { background: #eae9d1; }
+.game-hud .mode-switch button.active::after { bottom: 4px; left: 22px; right: 20px; height: 1.5px; }
+.hud-utilities { --frame-paper: #f8f3e2; position: relative; isolation: isolate; padding: 7px 10px; gap: 9px; min-height: 50px; }
+.hud-utilities .hud-button { font-size: 13px; gap: 7px; min-height: 36px; }
+.hud-utilities .hud-button > svg { width: 31px; height: 31px; }
+.hud-utilities > .icon-button { width: 34px; height: 34px; }
+.hud-utilities > .icon-button svg { width: 23px; height: 23px; }
+.dock-divider { height: 25px; width: 1px; background: #c9d0b8; }
+.app .tool-rail { left: 22px; padding: 10px 8px; gap: 7px; }
+.app .tool-rail .icon-button { width: 39px; height: 39px; }
+.app .tool-rail .icon-button svg { width: 24px; height: 24px; }
+.tool-flyout { min-width: 280px; }
+.tool-flyout strong { font-size: 13px; }
+.tool-flyout small { font-size: 10px; }
+.tool-flyout-heading { font-size: 10px; }
+.game-canvas-controls { left: 22px; bottom: 22px; padding: 7px 11px 16px; gap: 4px; }
+.game-canvas-controls .icon-button { width: 31px; height: 31px; }
+.game-canvas-controls .icon-button svg { width: 19px; height: 19px; }
+.game-canvas-controls .zoom-value { font-size: 11px; min-width: 40px; }
+.plan-scale { left: 28px; bottom: 90px; }
+.game-social { --frame-paper: #f8f3e2; position: fixed; isolation: isolate; right: 22px; bottom: 22px; padding: 7px 9px; gap: 5px; flex-direction: row; }
+.game-social > button { --frame-paper: transparent; width: 56px; height: 58px; padding: 3px; background: none; }
+.game-social > button:first-child { transform: none; }
+.game-social > button > svg { width: 32px; height: 32px; }
+.game-social > button > span { font-size: 18px; }
+.game-social > button:hover, .game-social > button[aria-expanded="true"] { background: #e5e8cf; border-radius: 4px; }
+.app .library-panel { display: block; overflow: hidden; width: 340px; top: 119px; right: 22px; bottom: 112px; padding: 28px 22px 18px; }
+.library-scroll { position: absolute; inset: 27px 13px 15px 22px; overflow-y: auto; overflow-x: hidden; padding-right: 7px; }
+.app .library-panel .close-library { z-index: 2; }
+.app .library-panel .furniture-catalog { min-height: 0; overflow: visible; flex: none; }
+.app .library-panel .panel-heading h2 { font-size: 31px; }
+.app .library-panel .panel-description { font-size: 12px; line-height: 1.6; }
+.app .library-panel .panel-heading .eyebrow { font-size: 8px; }
+.app .library-panel .shelf-tabs button { font-size: 12px; }
+.app .library-panel .search-field input { font-size: 12px; }
+.app .library-panel .category-chips button { font-size: 10px; padding: 7px 0; }
+.app .library-panel .furniture-name { font-size: 11px; }
+.app .library-panel .furniture-subtitle { font-size: 13px; }
+.app .library-panel .catalog-section-label > span { font-size: 8px; }
+.app .library-panel .furniture-card { height: 150px; min-height: 150px; }
+.app .library-panel .furniture-card-art { height: 105px; }
+.app .library-panel .upload-card small { font-size: 10px; }
+.app .chat-panel { right: 22px; bottom: 110px; }
+.app .workspace:not(.building) { background-color: #dbe3cc; background-image: var(--noise); }
+.topdown-opening { cursor: pointer; }
+.door-leaf { transition: transform .18s; }
+.app .workspace.camera-panning .room-scene,
+.app .workspace.camera-panning .room-scene * { cursor: grabbing !important; }
+.app .workspace.camera-panning .room-scene > g { transition: none; }
+.topdown-preview { width: 100%; height: 100%; }
+.app .tool-rail > .tool-rail-frame { width: calc(100% + 16px); }
+.app .tool-rail .tool-group-arrow { left: calc(100% + 7px); width: 15px; border: 0; border-radius: 0; background: transparent; }
+.tool-group.tab-exposed > .tool-group-arrow { opacity: 1; pointer-events: auto; }
+.app .hud-utilities { transform: translateX(0); transition: transform .32s cubic-bezier(.4,0,.2,1) .15s, visibility 0s .15s !important; }
+.app .hud-utilities.is-away { transform: translateX(calc(100% + 32px)); visibility: hidden; pointer-events: none; transition: transform .32s cubic-bezier(.4,0,.2,1), visibility 0s .32s !important; }
+.app .library-panel {
+  top: 18px; bottom: 20px; right: 20px; width: 382px; max-width: calc(100vw - 82px); z-index: 25;
+  transform: translateX(calc(100% + 40px)); visibility: hidden; pointer-events: none;
+  transition: transform .44s cubic-bezier(.22,.68,.2,1), visibility 0s .44s !important;
+}
+.app .library-panel.is-open { transform: translateX(0); visibility: visible; pointer-events: auto; transition: transform .44s cubic-bezier(.22,.68,.2,1) .16s, visibility 0s !important; }
+.app.drawer-open .game-social { visibility: hidden; pointer-events: none; }
+.app .library-panel .library-scroll { inset: 42px 17px 22px 25px; }
+.app .library-panel .close-library { top: 12px; right: 14px; width: 31px; height: 31px; }
+.app .library-panel .close-library svg { width: 19px; height: 19px; }
+.app .library-panel .shelf-tabs { display: flex; justify-content: space-between; gap: 10px; margin: 18px 0 14px; }
+.finish-book fieldset { min-width: 0; padding: 20px 0 24px; border: 0; border-bottom: 1px solid #d6d4b9; margin: 22px 0; }
+.finish-book legend { font-family: var(--hand); font-size: 25px; color: #657652; padding: 0; }
+.finish-book .floor-options { display: grid; grid-template-columns: 1fr 1fr; gap: 20px 16px; }
+.finish-book .floor-options button { font-size: 12px; }
+.finish-book .wall-swatches { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.finish-book .wall-swatches button { width: 100%; height: 48px; border-radius: 3px 5px 2px 4px; }
+.finish-book fieldset:disabled { opacity: .65; }
+@media (max-width: 1100px) {
+  .app .library-panel { top: 107px; bottom: 16px; }
+}
+.furniture-toolbar { --frame-paper: #faf5e4; --frame-ink: #8a9b73; position: absolute; z-index: 15; isolation: isolate; display: flex; align-items: center; gap: 2px; padding: 7px 9px; max-width: calc(100% - 24px); color: #677852; }
+.app .furniture-toolbar .icon-button { width: 32px; height: 33px; flex: 0 0 auto; border: 0; border-radius: 3px; background: transparent; }
+.app .furniture-toolbar .icon-button:hover { background: #e1e8ce; }
+.furniture-tool-divider { height: 23px; width: 1px; background: #cdd3b8; margin: 0 4px; flex-shrink: 0; }
+.furniture-angle { font-size: 10px; min-width: 27px; text-align: center; font-variant-numeric: tabular-nums; }
+@media (max-width: 540px) {
+  .app .furniture-toolbar .icon-button { width: 26px; height: 31px; }
+  .app .furniture-toolbar .icon-button svg { width: 17px; }
+  .furniture-toolbar { gap: 1px; padding: 6px 7px; }
+  .furniture-tool-divider { margin: 0 2px; }
+}
+
+.divider-body-hit { cursor: move; }
+.divider-end-hit { cursor: crosshair; }
+.tool-door .divider-body-hit,
+.tool-door .divider-end-hit,
+.tool-window .divider-body-hit,
+.tool-window .divider-end-hit { cursor: crosshair; }
+@media (max-width: 760px) {
+  .game-hud { inset: 15px; }
+  .game-menu-trigger { height: 45px; font-size: 20px; padding: 7px 12px; }
+  .game-hud .mode-switch { top: 14px; padding: 5px; gap: 2px; }
+  .game-hud .mode-switch button { width: 66px; min-height: 66px; font-size: 18px; }
+  .game-hud .mode-switch button svg { width: 30px; height: 30px; }
+  .hud-utilities { min-height: 45px; padding: 6px 8px; gap: 6px; }
+  .hud-utilities .hud-button { font-size: 11px; gap: 4px; }
+  .hud-utilities .hud-button > svg { width: 27px; height: 27px; }
+  .app .tool-rail { left: 15px; padding: 8px 6px; gap: 5px; }
+  .app .tool-rail .icon-button { width: 36px; height: 36px; }
+  .app .tool-rail .icon-button svg { width: 22px; height: 22px; }
+  .game-canvas-controls { left: 15px; bottom: 16px; padding: 6px 9px 15px; gap: 2px; }
+  .game-canvas-controls .icon-button { width: 27px; height: 28px; }
+  .game-canvas-controls .zoom-value { font-size: 10px; min-width: 35px; }
+  .game-social { right: 15px; bottom: 16px; padding: 6px; gap: 2px; }
+  .game-social > button { width: 47px; height: 53px; }
+  .game-social > button > svg { width: 29px; height: 29px; }
+  .game-social > button > span { font-size: 16px; }
+  .app .library-panel { right: 15px; top: 108px; bottom: 101px; width: 320px; max-width: calc(100vw - 80px); padding: 24px 18px 14px; }
+  .app .chat-panel { right: 15px; bottom: 98px; }
+  .plan-scale { bottom: 80px; left: 20px; }
+}
+@media (max-width: 540px) {
+  .game-menu-trigger { width: 44px; padding: 10px; }
+  .game-menu-trigger > span, .game-save-status { display: none; }
+  .game-hud .mode-switch button { width: 54px; min-height: 62px; font-size: 16px; padding-left: 3px; padding-right: 3px; }
+  .game-hud .mode-switch button svg { width: 28px; height: 28px; }
+  .game-hud .mode-switch button.active::after { left: 15px; right: 14px; }
+  .hud-utilities { gap: 0; padding: 5px; }
+  .hud-utilities .hud-button { width: 34px; min-height: 34px; }
+  .hud-utilities .hud-button > span, .hud-utilities .dock-divider { display: none; }
+  .hud-utilities > .icon-button { width: 30px; height: 34px; }
+  .hud-utilities > .icon-button svg { width: 20px; height: 20px; }
+  .game-social { bottom: 86px; }
+  .app .chat-panel { bottom: 163px; }
+  .app .library-panel { bottom: 165px; }
+  .app .wall-edit-panel { bottom: 165px; font-size: 10px; }
+  .app .tool-rail { left: 12px; }
+  .tool-flyout { min-width: 250px; }
+  .tool-flyout small { font-size: 9px; white-space: normal; }
+}
+
+/* The open book uses the full right edge; its own close control stays fixed. */
+@media (max-width: 760px) {
+  .app .library-panel { top: 101px; bottom: 15px; width: 350px; right: 15px; }
+}
+@media (max-width: 540px) {
+  .app .library-panel { top: 94px; bottom: 14px; right: 12px; max-width: calc(100vw - 76px); }
+  .app .library-panel .library-scroll { inset: 41px 12px 19px 19px; }
+  .app .library-panel .shelf-tabs { gap: 8px; }
+  .app .library-panel .shelf-tabs button { font-size: 11px; }
+}
