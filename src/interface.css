@@ -391,6 +391,39 @@
   .game-social > button > span { font-size: 14px; }
 }
 
+/* The editor is primarily used as a visual tool; keep its controls readable. */
+.game-menu button { font-size: 15px; padding: 15px 10px; }
+.game-menu { width: 270px; }
+.game-menu-trigger { font-size: 25px; min-height: 54px; }
+.game-hud .mode-switch button { font-size: 14px; min-height: 78px; }
+.game-hud .mode-switch button svg { width: 37px; height: 37px; }
+.app .tool-rail .icon-button { width: 44px; height: 44px; }
+.app .tool-rail .icon-button svg { width: 27px; height: 27px; }
+.game-canvas-controls .icon-button { width: 35px; height: 35px; }
+.game-canvas-controls .icon-button svg { width: 21px; height: 21px; }
+.game-canvas-controls .zoom-value { font-size: 13px; min-width: 44px; }
+.game-social > button > span { font-size: 19px; }
+
+/* Desktop controls need to read as primary interface, not annotation. */
+@media (min-width: 761px) {
+  .game-menu-trigger { font-size: 30px; min-height: 62px; padding: 10px 18px; }
+  .game-menu { width: 320px; }
+  .game-menu button { font-size: 18px; padding: 18px 13px; gap: 14px; }
+  .game-hud .mode-switch button { width: 102px; min-height: 92px; font-size: 18px; }
+  .game-hud .mode-switch button svg { width: 44px; height: 44px; }
+  .app .tool-rail .icon-button { width: 52px; height: 52px; }
+  .app .tool-rail .icon-button svg { width: 31px; height: 31px; }
+  .game-canvas-controls .icon-button { width: 43px; height: 43px; }
+  .game-canvas-controls .icon-button svg { width: 25px; height: 25px; }
+  .game-canvas-controls .zoom-value { font-size: 16px; min-width: 54px; }
+  .game-social > button { width: 66px; height: 70px; }
+  .game-social > button > svg { width: 40px; height: 40px; }
+  .game-social > button > span { font-size: 21px; }
+}
+
+/* Keep the canvas clear of transient bottom banners and warning toasts. */
+.app .drawing-hint, .app .wall-edit-panel, .app .interaction-prompt, .app .toast { display: none !important; }
+
 /* Work across the top; drawing tools at the left; view and social controls
    occupy the two lower corners. Each dock has one clear purpose. */
 .game-hud { inset: 20px 22px auto; gap: 20px; }

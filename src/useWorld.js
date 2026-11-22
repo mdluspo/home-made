@@ -124,7 +124,7 @@ export function useWorld(notify) {
   const commit = useCallback(updater => {
     const old = currentHome.current;
     const changed = typeof updater === 'function' ? updater(old) : updater;
-    const structural = changed.boundary !== old.boundary || changed.walls !== old.walls || changed.sections !== old.sections;
+    const structural = changed.boundary !== old.boundary || changed.walls !== old.walls || changed.sections !== old.sections || changed.openings !== old.openings;
     const next = structural ? normalizePlan(changed) : changed;
     if (JSON.stringify(old) === JSON.stringify(next)) return;
     updateHistory(recordHistory(historyRef.current,old));

@@ -30,7 +30,7 @@ export function furnitureVisualBounds(type){
 export const makeId = () => globalThis.crypto.randomUUID();
 export function initialHome() {
   return {
-    name: 'My home', description: 'An empty space, ready to become your home.',
+    name: 'My house', description: 'An empty space, ready to become your home.',
     geometryVersion: 2, floor: 'oak', wallColor: '#e7e5cf', grid: true,
     boundary: [], sections: [], outlines: [], holes: [], walls: [], openings: [], custom: [],
     items: [],
@@ -43,9 +43,9 @@ export const DEFAULT_BOUNDARY = [];
 export const planToWorld = p => ({ x: 540 + (p.x - 540) * .78 - (p.y - 385) * .78, y: 445 + (p.x - 540) * .4 + (p.y - 385) * .4 });
 export const worldToPlan = p => ({ x: 540 + ((p.x - 540) / .78 + (p.y - 445) / .4) / 2, y: 385 + ((p.y - 445) / .4 - (p.x - 540) / .78) / 2 });
 export function migrateHome(home) {
-  if (home.geometryVersion === 2) return home;
+  if (home.geometryVersion === 2) return home.name === 'My little sanctuary' || home.name === 'Little sanctuary' ? { ...home, name: 'My house' } : home;
   const originalItems = home.items.filter(i => !i.id.endsWith('-initial'));
-  return { ...home, geometryVersion: 2,
+  return { ...home, name: home.name === 'My little sanctuary' || home.name === 'Little sanctuary' ? 'My house' : home.name, geometryVersion: 2,
     items: originalItems.map(i => ({ ...i, ...worldToPlan(i) })),
     boundary: home.boundary.map(worldToPlan),
     walls: home.walls.map(w => ({ ...w, points: w.points.map(worldToPlan) })),
@@ -234,7 +234,38 @@ export function normalizePlan(home) {
     push();
   });
   const edges=[...walls.map(w=>w.points),...rings.map(r=>[...r,r[0]])];
-  const openings=home.openings.filter(o=>edges.some(ps=>ps.some((p,i)=>i>0&&distanceToSegment(o,ps[i-1],p)<14)));
+  const alignedOpenings=home.openings.filter(o=>edges.some(ps=>ps.some((p,i)=>i>0&&distanceToSegment(o,ps[i-1],p)<14))).map(opening=>{
+    if(edges.some(ps=>ps.some((p,i)=>i>0&&distanceToSegment(opening,ps[i-1],p)<.001)))return opening;
+    let best=null;
+    for(const points of edges)for(let i=1;i<points.length;i++){
+      const a=points[i-1],b=points[i],dx=b.x-a.x,dy=b.y-a.y,length=Math.hypot(dx,dy),t=Math.max(0,Math.min(1,((opening.x-a.x)*dx+(opening.y-a.y)*dy)/(length*length||1))),q={x:a.x+t*dx,y:a.y+t*dy},distance=Math.hypot(q.x-opening.x,q.y-opening.y),angle=Math.atan2(dy,dx)*180/Math.PI;
+      const aligned=Math.abs(Math.cos((angle-(opening.angle||0))*Math.PI/180))>.96,score=distance+(distance<14&&!aligned?14:0);
+      if(!best||score<best.score)best={a,b,t,length,angle,score};
+    }
+    if(!best)return opening;
+    const clearance=Math.min(21/Math.max(best.length,21),.5),t=Math.max(clearance,Math.min(1-clearance,best.t));
+    let angle=best.angle;if(Math.cos((angle-(opening.angle||0))*Math.PI/180)<0)angle+=angle>0?-180:180;
+    return {...opening,x:best.a.x+t*(best.b.x-best.a.x),y:best.a.y+t*(best.b.y-best.a.y),angle};
+  });
+  const openings=[];
+  for(const opening of alignedOpenings){
+    if(opening.type==='door'){
+      const nearby= openings.filter(o=>o.type==='door'&&Math.abs(Math.sin(((o.angle||0)-(opening.angle||0))*Math.PI/180))<.12&&Math.hypot(o.x-opening.x,o.y-opening.y)<100);
+      if(nearby.some(o=>Math.hypot(o.x-opening.x,o.y-opening.y)<18)||nearby.length>=2)continue;
+    }
+    openings.push(opening);
+  }
+  const paired=new Set();
+  for(let i=0;i<openings.length;i++){
+    const first=openings[i];if(first.type!=='door'||paired.has(i))continue;
+    const secondIndex=openings.findIndex((o,j)=>j>i&&!paired.has(j)&&o.type==='door'&&Math.abs(Math.sin(((o.angle||0)-(first.angle||0))*Math.PI/180))<.12&&Math.hypot(o.x-first.x,o.y-first.y)<100);
+    if(secondIndex<0)continue;
+    const second=openings[secondIndex],angle=(first.angle||0)*Math.PI/180,cx=(first.x+second.x)/2,cy=(first.y+second.y)/2,ux=Math.cos(angle)*21,uy=Math.sin(angle)*21;
+    const left={x:cx-ux,y:cy-uy},right={x:cx+ux,y:cy+uy};
+    const fits=p=>edges.some(points=>points.some((a,k)=>k>0&&distanceToSegment(p,points[k-1],a)<.5));
+    if(fits(left)&&fits(right)){first.x=left.x;first.y=left.y;second.x=right.x;second.y=right.y;}
+    paired.add(i);paired.add(secondIndex);
+  }
   return {...home,walls,openings};
 }
 export function homeSpawn(home) {

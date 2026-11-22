@@ -73,7 +73,8 @@ function openingCutout(surface,opening){
   const above=(plane,min)=>[plane[0],plane[1],plane[2]-min];
   const below=(plane,max)=>[-plane[0],-plane[1],max-plane[2]];
   let cutout=surface.original;
-  for(const plane of [above(along,-21),below(along,21),above(across,-half),below(across,half),above(elevation,bottom),below(elevation,top)]){
+  const openingHalf=(opening.type==='window'?(opening.windowSpan||42):(opening.doorSpan||42))/2;
+  for(const plane of [above(along,-openingHalf),below(along,openingHalf),above(across,-half),below(across,half),above(elevation,bottom),below(elevation,top)]){
     const region=frontHalfPlane(surface.bounds,plane);
     if(!region)return [];
     cutout=snapped(clipping.intersection(cutout,region));
@@ -84,20 +85,65 @@ function openingCutout(surface,opening){
 
 export function roomOpenings(home,edges){
   return (home.openings||[]).map(opening=>{
-    const wall=edges.reduce((best,edge)=>{
+    const wall=edges.reduce((best,edge,index)=>{
       const a=edge.planA||edge.a,b=edge.planB||edge.b,distance=distanceToSegment(opening,a,b);
       const aligned=Math.abs(Math.cos(Math.atan2(b.y-a.y,b.x-a.x)-(opening.angle||0)*Math.PI/180))>.96;
       const score=distance+(distance<14&&!aligned?14:0);
-      return score<best.score?{distance,score,...edge}:best;
+      return score<best.score?{distance,score,edgeIndex:index,...edge}:best;
     },{distance:Infinity,score:Infinity,height:CUTAWAY_HEIGHT,thickness:12});
     if(!wall.a)return {...opening,height:wall.height,thickness:wall.thickness};
     const a=wall.planA||wall.a,b=wall.planB||wall.b,px=b.x-a.x,py=b.y-a.y;
     const dx=wall.b.x-wall.a.x,dy=wall.b.y-wall.a.y;
-    const t=Math.max(0,Math.min(1,((opening.x-a.x)*px+(opening.y-a.y)*py)/(px*px+py*py)));
+    const length=Math.hypot(px,py);
+    const rawT=((opening.x-a.x)*px+(opening.y-a.y)*py)/(px*px+py*py);
+    const edgeClearance=Math.min(21/Math.max(length,21),.5);
+    const t=Math.max(edgeClearance,Math.min(1-edgeClearance,rawT));
     let angle=Math.atan2(dy,dx)*180/Math.PI;
     if(Math.cos((angle-(opening.angle||0))*Math.PI/180)<0)angle+=angle>0?-180:180;
-    return {...opening,x:wall.a.x+t*dx,y:wall.a.y+t*dy,angle,height:wall.height,thickness:wall.thickness,wallPosition:t};
+    return {...opening,x:wall.a.x+t*dx,y:wall.a.y+t*dy,angle,height:wall.height,thickness:wall.thickness,wallPosition:t,wallIndex:wall.edgeIndex,wallLength:length,wallA:a,wallB:b};
   });
+}
+
+export function combineNearbyWindows(openings, gap = 18){
+  const result=[];
+  for(const opening of openings){
+    if(opening.type!=='window'){ result.push(opening); continue; }
+    const angle=(opening.angle||0)*Math.PI/180;
+    const center=opening.wallLength===undefined?null:opening.wallPosition*opening.wallLength;
+    const match=result.find(candidate=>candidate.type==='window' &&
+      (opening.wallIndex===undefined||candidate.wallIndex===undefined||candidate.wallIndex===opening.wallIndex) &&
+      Math.abs(Math.sin(((candidate.angle||0)-(opening.angle||0))*Math.PI/180))<.08 &&
+      (center===null||Math.max(candidate.windowStart,center-21)-Math.min(candidate.windowEnd,center+21)<=gap) &&
+      Math.abs((opening.x-candidate.x)*Math.sin(angle)-(opening.y-candidate.y)*Math.cos(angle))<10);
+    const span=opening.windowSpan||42;
+    const start=center===null?-span/2:center-span/2,end=center===null?span/2:center+span/2;
+    if(!match){ result.push({...opening,windowSpan:span,windowStart:start,windowEnd:end,windowCount:opening.windowCount||1}); continue; }
+    match.windowStart=Math.min(match.windowStart,start);match.windowEnd=Math.max(match.windowEnd,end);
+    match.windowSpan=match.windowEnd-match.windowStart;
+    match.windowCount=(match.windowCount||1)+(opening.windowCount||1);
+    if(match.wallLength){
+      const midpoint=(match.windowStart+match.windowEnd)/2;
+      const t=Math.max(0,Math.min(1,midpoint/match.wallLength));
+      match.x=match.wallA.x+t*(match.wallB.x-match.wallA.x);match.y=match.wallA.y+t*(match.wallB.y-match.wallA.y);match.wallPosition=t;
+    }
+  }
+  return result;
+}
+
+export function combineDoorPairs(openings, gap = 18){
+  const result=[];
+  for(const opening of openings){
+    if(opening.type!=='door'){result.push(opening);continue;}
+    const match=result.find(candidate=>candidate.type==='door'&&
+      (candidate.doorIds||[candidate.id]).length<2&&
+      (opening.wallIndex===undefined||candidate.wallIndex===undefined||opening.wallIndex===candidate.wallIndex)&&
+      Math.abs(Math.sin(((candidate.angle||0)-(opening.angle||0))*Math.PI/180))<.12&&
+      Math.hypot(candidate.x-opening.x,candidate.y-opening.y)<84+gap);
+    if(!match){result.push({...opening,doorSpan:42,doorIds:[opening.id]});continue;}
+    const angle=(opening.angle||0)*Math.PI/180,cx=(match.x+opening.x)/2,cy=(match.y+opening.y)/2;
+    result.splice(result.indexOf(match),1,{...match,x:cx,y:cy,doorSpan:84,doorIds:[...(match.doorIds||[match.id]),opening.id]});
+  }
+  return result;
 }
 
 // Larger floor-plan Y is closer to the camera. Compare depths at each projected
@@ -222,7 +268,7 @@ export function buildRoomWalls(home){
       surfaces.push({kind:'face',rimReturn,height,plane:[slope,0,ay-slope*ax],original:snapped([[[[ax,ay],[bx,by],[bx,by-height],[ax,ay-height],[ax,ay]]]])});
     }
   }
-  const openings=roomOpenings(home,edges);
+  const openings=combineDoorPairs(combineNearbyWindows(roomOpenings(home,edges),24));
   for(const surface of surfaces){
     surface.bounds=bounds(surface.original);
     for(const opening of openings){

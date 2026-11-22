@@ -160,7 +160,7 @@ function App() {
         const t = Math.max(0, Math.min(1, ((p.x-a.x)*dx+(p.y-a.y)*dy)/(dx*dx+dy*dy || 1)));
         const q = { x: a.x+t*dx, y: a.y+t*dy };
         const dist = Math.hypot(q.x-p.x,q.y-p.y);
-        if (dist < best.dist) best = { point: q, dist, angle: Math.atan2(dy,dx)*180/Math.PI };
+        if (dist < best.dist) best = { point: q, dist, angle: Math.atan2(dy,dx)*180/Math.PI, length: Math.hypot(dx,dy), along: t*Math.hypot(dx,dy) };
       }
     }
     return best;
@@ -194,6 +194,10 @@ function App() {
     if (mode === 'build' && ['door', 'window'].includes(tool) && buildable) {
       const nearest = nearestWall(p);
       if (nearest.dist > 65) return notify('Place your ' + tool + ' a little closer to a wall.');
+      if (nearest.length < 42 || nearest.along < 21 || nearest.length - nearest.along < 21) return notify('Leave a little space at the end of the wall so the whole ' + tool + ' stays inside your home.');
+      const nearbyDoors = tool === 'door' ? home.openings.filter(o => o.type === 'door' && Math.abs(Math.sin(((o.angle||0)-nearest.angle)*Math.PI/180)) < .12 && Math.hypot(o.x-nearest.point.x,o.y-nearest.point.y) < 100) : [];
+      if (nearbyDoors.some(o => Math.hypot(o.x-nearest.point.x,o.y-nearest.point.y) < 18)) return notify('That door is already occupied. Move it a little farther away.');
+      if (nearbyDoors.length >= 2) return notify('A doorway can have at most two doors side by side.');
       commit(h => ({ ...h, openings: [...h.openings, { id: makeId(), type: tool, ...nearest.point, angle: nearest.angle, open: false }] })); return;
     }
     if(tool==='select'&&editable){
@@ -364,6 +368,12 @@ function App() {
     const keydown=e=>{
       if(['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)||e.target.isContentEditable) return;
       if(modal) return;
+      if((e.ctrlKey||e.metaKey)&&(e.key==='-'||e.key==='_'||e.key==='+'||e.key==='='||e.code==='NumpadSubtract'||e.code==='NumpadAdd')&&page==='home'){
+        e.preventDefault();
+        const zoomOut=e.key==='-'||e.key==='_'||e.code==='NumpadSubtract';
+        setZoom(z=>Math.max(.6,Math.min(1.7,Math.round((z+(zoomOut?-.1:.1))*10)/10)));
+        return;
+      }
       if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'&&editable){e.preventDefault();e.shiftKey?redo():undo();return;}
       if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='d'&&mode==='decorate'){e.preventDefault();duplicate();return;}
       if((e.key==='Delete'||e.key==='Backspace')&&mode!=='explore'&&page==='home'){e.preventDefault();removeSelected();}
@@ -479,6 +489,7 @@ function App() {
   const sceneItems=visibleHome.items.map(i=>preview?.id===i.id?{...i,...preview}:i);
   const groupCount=selectionCount(selection);
   const groupBounds=selectionBounds(visibleHome,selection,mode);
+  const openingSelectionOnly=selection.openings.length>0&&!selection.items.length&&!selection.walls.length&&!selection.boundary&&!selection.sections.length;
   const furnitureBounds=selectedItem?selectionBounds(visibleHome,{...emptySelection(),items:[selectedItem.id]},'decorate'):null;
   const chooseTool=id=>{floorClickRef.current=null;setTool(id);polygonDraft.current=[];drawing.current=null;setStroke([]);if(id!=='select'){setSelection(emptySelection());setSelected(null);setSelectedWall(null);}};
   const toolAction=action=>{
@@ -496,7 +507,8 @@ function App() {
       <div className="hud-left">
         <button className="game-menu-trigger" onClick={()=>setMenuOpen(v=>!v)} aria-expanded={menuOpen} aria-label="Game menu"><SketchFrame/><Menu size={24}/><span>Menu</span></button>
         <span className="game-save-status" role="status"><span className={`save-dot ${status==='Saved'?'is-saved':''}`}/>{status}</span>
-        {menuOpen&&<nav className="game-menu" aria-label="Game menu"><SketchFrame/><button onClick={returnHome}><House size={17}/>My home</button><button onClick={()=>{openNeighborhood();setMenuOpen(false);}}><Wind size={17}/>Neighborhood</button><button onClick={()=>{if(page==='neighborhood'&&!world.visit(profile.homeId))return;setPage('stickers');setCategory('All pieces');setQuery('');setMenuOpen(false);}}><BookOpen size={17}/>Sticker book</button><span/>{buildable&&<button onClick={()=>{setFormName(home.name);setModal('rename');setMenuOpen(false);}}><Pencil size={17}/>Name your home</button>}<button onClick={()=>{openProfile();setMenuOpen(false);}}><Users size={17}/>Your character</button><button onClick={()=>{setModal('help');setMenuOpen(false);}}><CircleHelp size={17}/>How to play</button><button onClick={exportHome}><Download size={17}/>Save a backup</button>{role==='owner'&&homeId===profile?.homeId&&<button onClick={startFreshPlan} title="Clear rooms and placed furniture. Keeps stickers. You can undo before refreshing."><RotateCcw size={17}/>Start a fresh plan</button>}</nav>}
+        {buildable&&page==='neighborhood'&&<button className="home-plaque" onClick={()=>{setFormName(home.name);setModal('rename');}} aria-label={`Rename ${home.name}`}><SketchFrame/><span className="plaque-house"><House size={34}/></span><span><strong>{home.name}</strong><small><Pencil size={10}/> click to rename</small></span></button>}
+        {menuOpen&&<nav className="game-menu" aria-label="Game menu"><SketchFrame/><button onClick={()=>{if(page==='neighborhood'&&!world.visit(profile.homeId))return;setPage('stickers');setCategory('All pieces');setQuery('');setMenuOpen(false);}}><BookOpen size={17}/>Sticker book</button><button onClick={()=>{setModal('help');setMenuOpen(false);}}><CircleHelp size={17}/>How to play</button><button onClick={()=>{setZoom(1);setCamera({x:0,y:0});setMenuOpen(false);}}><Eye size={17}/>Reset view</button><button onClick={exportHome}><Download size={17}/>Save a backup</button>{role==='owner'&&homeId===profile?.homeId&&<button onClick={startFreshPlan} title="Clear rooms and placed furniture. Keeps stickers. You can undo before refreshing."><RotateCcw size={17}/>Start a fresh plan</button>}</nav>}
       </div>
       <div className="hud-right">
         {page==='home'?<div className="mode-switch" aria-label="Game mode"><SketchFrame/>{[{id:'build',name:'Build'},{id:'decorate',name:'Decorate'},{id:'explore',name:'Explore'}].map(({id,name})=><button key={id} aria-pressed={mode===id} className={mode===id?'active':''} onClick={()=>changeMode(id)}><GameIcon kind={id}/><span>{name}</span></button>)}</div>:<button className="hud-button" onClick={returnHome}><GameIcon kind="home"/><span>Back home</span></button>}
@@ -511,7 +523,7 @@ function App() {
         {mode==='build'&&tool!=='select'&&<div className="drawing-hint"><Pencil size={14}/>{({rectangle:'Click and drag to draw your home outline',polygon:'Click each corner. Click the first point to close your outline.',wall:'Click and drag to divide a room',freeform:'Draw freely. We’ll smooth the little wobbles.',boundary:'Draw a closed outline to reshape your home',door:'Click near a wall to add a door',window:'Click near a wall to add a window',eraser:'Click a wall or opening to remove it'})[tool]}</div>}
         <svg ref={svgRef} className="room-scene" viewBox="0 0 1080 760" role="img" aria-label={mode==='build'?'Top-down floor plan editor':'Your top-down home'} onContextMenu={e=>{e.preventDefault();if(!cameraDrag.current&&performance.now()>suppressContextUntil.current)onFloorContext(e);}} onPointerDownCapture={onCameraDown} onPointerDown={onSceneDown} onPointerMove={onSceneMove} onPointerUp={onSceneUp} onPointerCancel={()=>{cameraDrag.current=null;setPanning(false);dragging.current=null;drawing.current=null;floorClickRef.current=null;marqueeRef.current=null;setMarquee(null);setPreview(null);setStroke([]);}} onDragOver={e=>{e.preventDefault();e.dataTransfer.dropEffect='copy';}} onDrop={e=>{e.preventDefault();const type=e.dataTransfer.getData('application/home-made');if(type)addItem(type,pointFromEvent(e));}}>
           <g ref={groupRef} transform={`translate(${camera.x+540*(1-zoom)} ${camera.y+385*(1-zoom)}) scale(${zoom})`}>
-            {mode==='build'?<FloorPlan home={home} preview={preview} selectedWall={selectedWall} selection={selection} outlineEditMode={outlineEditMode} onWallDown={startWallDrag} onBoundaryDown={startBoundaryDrag} showGrid={home.grid} onOpeningDown={(e,o)=>{if(tool!=='select')return;e.stopPropagation();if(e.shiftKey){toggleSelected('openings',o.id);return;}setSelectedWall(null);setSelected(null);startGroupDrag(e,{...emptySelection(),openings:[o.id]});}}/>:<TopDownRoom home={visibleHome} onDoor={o=>{if(mode!=='explore')return;if(!buildable)return notify('The homeowner controls this door.');commit(h=>({...h,openings:h.openings.map(d=>d.id===o.id?{...d,open:!d.open}:d)}));}}/>}
+            {mode==='build'?<FloorPlan home={home} preview={preview} selectedWall={selectedWall} selection={selection} outlineEditMode={outlineEditMode} onWallDown={startWallDrag} onBoundaryDown={startBoundaryDrag} showGrid={home.grid} onOpeningDown={(e,o)=>{if(tool!=='select')return;e.stopPropagation();if(e.shiftKey){toggleSelected('openings',o.id);return;}setSelectedWall(null);setSelected(null);setSelection({...emptySelection(),openings:[o.id]});}}/>:<TopDownRoom home={visibleHome} onDoor={o=>{if(mode!=='explore')return;if(!buildable)return notify('The homeowner controls this door.');const ids=new Set(o.doorIds||[o.id]);commit(h=>({...h,openings:h.openings.map(d=>ids.has(d.id)?{...d,open:!d.open}:d)}));}}/>}
             {(mode==='build'?[]:sceneItems).map(item=><g key={item.id} transform={`translate(${item.x} ${item.y}) rotate(${item.rotation}) scale(${item.scale})`} className={`furniture ${mode==='decorate'?'can-drag':''} ${selection.items.includes(item.id)?'is-selected':''}`} onPointerDown={e=>onItemDown(e,item)} style={{opacity:item.opacity??1}}>
               <g transform={`scale(${item.flipped?-1:1} 1)`}><TopDownFurniture type={item.type} custom={home.custom.find(c=>c.id===item.type)}/></g>
               {mode==='decorate'&&selected===item.id&&groupCount<=1&&<FurnitureSelection item={item} onResize={(e,i)=>{if(i.locked)return;e.stopPropagation();const p=pointFromEvent(e);dragging.current={id:i.id,resize:true,scale:i.scale,center:{x:i.x,y:i.y},distance:Math.hypot(p.x-i.x,p.y-i.y)};svgRef.current.setPointerCapture(e.pointerId);}}/>}
@@ -519,7 +531,7 @@ function App() {
             {mode==='explore'&&home.boundary.length>2&&<TopDownCharacter {...position} color={profile?.color} name={profile?.name} sitting={sitting}/>}
             {mode!=='build'&&players.filter(p=>p.id!==profile?.id).map(p=><TopDownCharacter key={p.connectionId} {...p.position} color={p.color} name={p.name}/>)}
             {!!stroke.length&&<g pointerEvents="none">{['rectangle','ellipse'].includes(tool)&&stroke.length>1?<><path d={tool==='ellipse'?ellipsePath(stroke[0],stroke.at(-1)):'M'+rectangleFromPoints(stroke[0],stroke.at(-1)).map(p=>p.x+','+p.y).join(' L')+' Z'} fill="#f9fbef88" stroke="#7c9965" strokeWidth="3" strokeDasharray="7 4"/><Dimension a={rectangleFromPoints(stroke[0],stroke.at(-1))[0]} b={rectangleFromPoints(stroke[0],stroke.at(-1))[1]} live/><Dimension a={rectangleFromPoints(stroke[0],stroke.at(-1))[1]} b={rectangleFromPoints(stroke[0],stroke.at(-1))[2]} live/></>:<><path d={['wall','polygon'].includes(tool)?'M'+stroke.map(p=>p.x+','+p.y).join(' L'):smoothPath(stroke,tool==='boundary')} fill={['polygon','boundary'].includes(tool)?'#c1cda329':'none'} stroke="#7c9965" strokeWidth="3" strokeDasharray="7 4" strokeLinecap="round"/>{tool==='wall'&&stroke.length>1&&<Dimension a={stroke[0]} b={stroke.at(-1)} live/>}{tool==='polygon'&&stroke.map((p,i)=><circle key={i} cx={p.x} cy={p.y} r={i===0?6:3} fill="#f9fbef" stroke="#7c9965" strokeWidth="1.5"/>)}</>}</g>}
-            {tool==='select'&&groupBounds&&groupCount>1&&<g className="group-selection"><rect {...groupBounds} rx="3" fill="#9cb77b0a" stroke="#90aa72" strokeWidth="1.4" strokeDasharray="6 4" pointerEvents="stroke" onPointerDown={e=>startGroupDrag(e)}/><g pointerEvents="none">{[[groupBounds.x,groupBounds.y],[groupBounds.x+groupBounds.width,groupBounds.y],[groupBounds.x,groupBounds.y+groupBounds.height],[groupBounds.x+groupBounds.width,groupBounds.y+groupBounds.height]].map(([x,y],i)=><rect key={i} x={x-3} y={y-3} width="6" height="6" rx="1" fill="#f8f9ec" stroke="#90aa72" strokeWidth="1"/>)}</g></g>}
+            {tool==='select'&&groupBounds&&groupCount>0&&<g className="group-selection"><rect {...groupBounds} rx="3" fill="#9cb77b0a" stroke="#90aa72" strokeWidth="1.4" strokeDasharray="6 4" pointerEvents={openingSelectionOnly?'none':'stroke'} onPointerDown={openingSelectionOnly?undefined:e=>startGroupDrag(e)}/><g pointerEvents="none">{[[groupBounds.x,groupBounds.y],[groupBounds.x+groupBounds.width,groupBounds.y],[groupBounds.x,groupBounds.y+groupBounds.height],[groupBounds.x+groupBounds.width,groupBounds.y+groupBounds.height]].map(([x,y],i)=><rect key={i} x={x-3} y={y-3} width="6" height="6" rx="1" fill="#f8f9ec" stroke="#90aa72" strokeWidth="1"/>)}</g></g>}
             {marquee&&<rect {...boxFromPoints(marquee.start,marquee.end)} className="selection-marquee" fill="#9ab47a25" stroke="#8ba96e" strokeWidth="1" pointerEvents="none"/>}
           </g>
         </svg>
