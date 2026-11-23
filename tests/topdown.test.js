@@ -10,6 +10,32 @@ const bundle=await build({entryPoints:[fileURLToPath(new URL('../src/TopDown.jsx
 const {TopDownRoom,TopDownFurniture,TopDownCharacter}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0].text).toString('base64'));
 const render=(Component,props)=>renderToStaticMarkup(React.createElement('svg',null,React.createElement(Component,props)));
 
+test('decorate retains both paired door leaves and swings them oppositely without rotating their verticals',()=>{
+  for(const angle of [0,25,90]){
+    const r=angle*Math.PI/180;
+    const home=normalizePlan({...initialHome(),boundary:rectangleFromPoints({x:100,y:100},{x:700,y:600}),walls:[{id:'wall',points:[{x:400-200*Math.cos(r),y:300-200*Math.sin(r)},{x:400+200*Math.cos(r),y:300+200*Math.sin(r)}]}],openings:[-1,1].map((side,i)=>({id:`leaf-${i}`,type:'door',x:400+side*21*Math.cos(r),y:300+side*21*Math.sin(r),angle,open:false}))});
+    const closed=render(TopDownRoom,{home});
+    assert.match(closed,/class="topdown-opening topdown-door double-door"/);
+    assert.equal((closed.match(/class="door-leaf double-door-leaf"/g)||[]).length,2);
+    const open=render(TopDownRoom,{home:{...home,openings:home.openings.map(o=>({...o,open:true}))}});
+    const angles=[...open.matchAll(/class="double-door-leaf-(?:left|right)"[^>]*data-plan-angle="([^"]+)"/g)].map(m=>Number(m[1]));
+    assert.equal(angles.length,2);
+    assert.ok(Math.abs(angles[0]-angle-70)<.001);assert.ok(Math.abs(angles[1]-angle+70)<.001);
+    assert.doesNotMatch(open,/transform="rotate\(|NaN|Infinity/);
+    assert.notEqual(open,closed);
+  }
+});
+
+test('every decorated floor has a centered title ABOVE its full footprint, even at negative coordinates',()=>{
+  const home=normalizePlan({...initialHome(),sections:[{id:'base',points:rectangleFromPoints({x:-300,y:-180},{x:250,y:250})},{id:'upper',points:rectangleFromPoints({x:350,y:-180},{x:600,y:100})}]});
+  const multiple=render(TopDownRoom,{home});
+  assert.match(multiple,/>Level 1<\/text>/);assert.match(multiple,/>Level 2<\/text>/);
+  assert.ok(multiple.lastIndexOf('class="level-titles"')>multiple.indexOf('class="topdown-floor"'),'titles paint after the opaque floor');
+  const single=render(TopDownRoom,{home:normalizePlan({...initialHome(),boundary:home.sections[0].points})});
+  assert.match(single,/>Level 1<\/text>/);assert.doesNotMatch(single,/>Level 2<\/text>/);
+  assert.match(single,/x="-25" y="-286"/,'the title follows the full outline, without a zero-coordinate clamp');
+});
+
 test('the furnished room uses the floor-plan outline without an isometric transform',()=>{
   const home=normalizePlan({...initialHome(),boundary:rectangleFromPoints({x:100,y:150},{x:700,y:500})});
   const markup=render(TopDownRoom,{home});

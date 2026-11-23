@@ -1,7 +1,9 @@
 import React, { useMemo } from 'react';
 import { CATALOG, distanceToSegment, floorOutlines, getSections, homeSpawn, planArea, planToWorld, PLAN_UNIT, pointInHome, smoothPath } from './model.js';
 import { outlineControls } from './editor.js';
-import { combineNearbyWindows, roomOpenings, roomWallEdges } from './roomWalls.js';
+import {LevelLabels} from './LevelLabels.jsx';
+import {StairObject} from './Stairs.jsx';
+import { combineDoorPairs, combineNearbyWindows, roomOpenings, roomWallEdges } from './roomWalls.js';
 
 const linePath = points => points.length ? 'M' + points.map(p => `${p.x},${p.y}`).join(' L') : '';
 
@@ -46,13 +48,13 @@ export function findRooms(home) {
   return rooms;
 }
 
-export function FloorPlan({ home: savedHome, preview, selectedWall, selection, outlineEditMode='resize', onWallDown, onBoundaryDown, onOpeningDown, showGrid }) {
+export function FloorPlan({ home: savedHome, preview, selectedWall, selection, outlineEditMode='resize', onWallDown, onBoundaryDown, onOpeningDown, onStairDown, showGrid,hideLevelLabels=false }) {
   const home=preview?.home||savedHome;
   const boundary=preview?.wallId==='boundary'?preview.points:home.boundary;
   const walls=home.walls.map(w=>w.id===preview?.wallId?{...w,points:preview.points}:w);
   const rooms=useMemo(()=>findRooms({...home,boundary,walls}),[home.boundary,home.walls,preview]);
   const alignedOpenings=useMemo(()=>roomOpenings({...home,boundary,walls},roomWallEdges({...home,boundary,walls})),[home,boundary,walls]);
-  const renderedOpenings=useMemo(()=>combineNearbyWindows(alignedOpenings),[alignedOpenings]);
+  const renderedOpenings=useMemo(()=>combineDoorPairs(combineNearbyWindows(alignedOpenings)),[alignedOpenings]);
   const rings=[...floorOutlines(home),...(home.holes||[])];
   const outline=rings.map(r=>linePath(r)+' Z').join(' ');
   const sections=getSections(home);
@@ -65,7 +67,7 @@ export function FloorPlan({ home: savedHome, preview, selectedWall, selection, o
     {!!boundary.length&&<>
       <path data-testid="plan-floor" d={outline} fill="#fbfaf2" fillRule="evenodd" stroke="none"/>
       {showGrid&&<path d={outline} fill="url(#plan-minor-grid)" pointerEvents="none"/>}
-      {home.items.map(i=>{const meta=CATALOG.find(c=>c.type===i.type);const w=(meta?.w||100)*i.scale*.5,h=(meta?.h||100)*i.scale*.35;return <g key={i.id} transform={`translate(${i.x} ${i.y}) rotate(${i.rotation})`} pointerEvents="none" opacity=".42"><rect x={-w/2} y={-h/2} width={w} height={h} rx="5" fill="#dbe3ca" stroke="#92a17c" strokeWidth="1"/><text y="3" textAnchor="middle" fontSize="6" fill="#849474">{meta?.name||'Sticker'}</text></g>;})}
+      {home.items.map(i=>{const meta=CATALOG.find(c=>c.type===i.type)||home.custom?.find(c=>c.id===i.type);const w=(meta?.w||100)*i.scale*.5,h=(meta?.h||100)*i.scale*.35;return <g key={i.id} transform={`translate(${i.x} ${i.y}) rotate(${i.rotation})`} pointerEvents="none"><rect x={-w/2} y={-h/2} width={w} height={h} rx="5" fill="none" stroke="#86a66f" strokeWidth="1.6" strokeDasharray="4 3"/><text y="3" textAnchor="middle" fontSize="9" fill="#76955f">{meta?.name||'Sticker'}</text></g>;})}
       <g className="joined-wall-network" fill="none" strokeLinejoin="round" strokeLinecap="round" pointerEvents="none">
         <g className="wall-outlines" stroke="#7e8b70">
           <path data-testid="joined-plan-walls" className="exterior-wall-outline" d={outline} strokeWidth="12"/>
@@ -88,13 +90,15 @@ export function FloorPlan({ home: savedHome, preview, selectedWall, selection, o
         {selectedWall===w.id&&<rect className="plan-vertex" x={w.points[i].x-4.5} y={w.points[i].y-4.5} width="9" height="9" rx="2" fill="#fffdf0" stroke="#80986a" strokeWidth="1.5" pointerEvents="none"/>}
       </g>)}
     </g>;})}
-      {renderedOpenings.map(o=>{const span=o.windowSpan||42;return <g key={o.id} className={`plan-opening plan-${o.type}`} transform={`translate(${o.x} ${o.y}) rotate(${o.angle||0})`} onPointerDown={e=>onOpeningDown(e,o)}><path d={`M-${span/2} 0h${span}`} stroke="#fbfaf2" strokeWidth="15"/>{o.type==='door'?<g fill="none" stroke="#8b997a" strokeWidth="1.2"><path d="M-20 0v-40" strokeWidth="2.4"/><path d="M-20-40A40 40 0 0 1 20 0" strokeDasharray="3 2"/><path d="M-22-7v14M22-7v14" stroke="#65715b" strokeWidth="2.5"/></g>:<path className="window-line" d={`M-${span/2} 0h${span}`} fill="none" stroke="#7e8b70" strokeWidth="1.6"/>}</g>;})}
+      {home.stairs?.map(s=><StairObject key={s.id} stair={s} onPointerDown={onStairDown}/>)}
+      {renderedOpenings.map(o=>{const span=o.windowSpan||o.doorSpan||42;return <g key={o.id} className={`plan-opening plan-${o.type} ${o.doorSpan>42?'double-door':''}`} transform={`translate(${o.x} ${o.y}) rotate(${o.angle||0})`} onPointerDown={e=>onOpeningDown(e,o)}><path d={`M-${span/2} 0h${span}`} stroke="#fbfaf2" strokeWidth="15"/>{o.type==='door'?o.doorSpan>42?<g fill="none" stroke="#8b997a" strokeWidth="1.2"><path d="M-42 0v-40M42 0v-40" strokeWidth="2.4"/><path d="M-42-40A40 40 0 0 1 0 0M42-40A40 40 0 0 0 0 0" strokeDasharray="3 2"/><path d="M-44-7v14M44-7v14" stroke="#65715b" strokeWidth="2.5"/></g>:<g fill="none" stroke="#8b997a" strokeWidth="1.2"><path d="M-20 0v-40" strokeWidth="2.4"/><path d="M-20-40A40 40 0 0 1 20 0" strokeDasharray="3 2"/><path d="M-22-7v14M22-7v14" stroke="#65715b" strokeWidth="2.5"/></g>:<path className="window-line" d={`M-${span/2} 0h${span}`} fill="none" stroke="#7e8b70" strokeWidth="1.6"/>}</g>;})}
       <g className="plan-opening-hit-targets" pointerEvents="none">
         {alignedOpenings.map(o=><g key={`hit-${o.id}`} transform={`translate(${o.x} ${o.y}) rotate(${o.angle||0})`} pointerEvents="stroke" onPointerDown={e=>onOpeningDown(e,o)}>
           <path d="M-21 0H21" stroke="transparent" strokeWidth="24"/>
         </g>)}
       </g>
       {(selectedWall==='boundary'||selectedSection)&&handles.map((p,i)=><rect className={`plan-vertex ${p.kind==='vertex'?'point-handle':'outline-resize-handle'}`} data-handle={i} aria-label={p.kind==='vertex'?`Edit outline point ${i+1}`:`Resize outline handle ${i+1}`} key={i} x={p.x-4.5} y={p.y-4.5} width="9" height="9" rx="2" fill="#fafbef" stroke="#7f9968" strokeWidth="1.5" style={{cursor:p.cursor}} onPointerDown={e=>onBoundaryDown(e,{kind:p.kind,index:p.index,control:p,sectionId:selectedSection?.id})}/>)}
+    {!hideLevelLabels&&<LevelLabels home={home}/>}
   </g>;
 }
 

@@ -1,7 +1,10 @@
 import React,{useId,useMemo} from 'react';
 import {Character} from './Art.jsx';
 import { floorOutlines, furnitureFootprint, furnitureVisualBounds } from './model.js';
-import {buildRoomWalls,combineDoorPairs,openingOccluders,wallGeometryPath} from './roomWalls.js';
+import {buildRoomWalls,openingOccluders,wallGeometryPath} from './roomWalls.js';
+import {LevelLabels} from './LevelLabels.jsx';
+import {StairObject} from './Stairs.jsx';
+import clipping from 'polygon-clipping';
 
 const pathOf=points=>'M'+points.map(p=>`${p.x},${p.y}`).join(' L');
 // Height always rises in screen Y; rotating a wall never rotates its verticals.
@@ -39,20 +42,26 @@ function SideDoor({opening:o,onDoor,mask,leafMask}){
     <g clipPath={mask} className="side-door-frame">{jamb(-back)}</g>
   </g>;
 }
-function DoubleDoor({opening:o,onDoor,mask,leafMask,portalClip}){
+function DoubleDoor({opening:o,onDoor,mask,leafMask}){
   const height=o.height,doorHeight=Math.max(8,height-9),half=(o.doorSpan||84)/2;
   return <g className="topdown-opening topdown-door double-door" data-wall-height={height} onPointerDown={e=>{e.stopPropagation();onDoor?.(o);}}>
     <g clipPath={mask}><path d={openingFace(o,-half,half,0,doorHeight)} fill="none" stroke="#7c8164" strokeWidth="2"/></g>
-    <g clipPath={leafMask}>
-      <path className="door-leaf double-door-leaf" d={openingFace(o,-half,0,0,doorHeight)} fill="#c4a274" stroke="#827b5a" strokeWidth="1.7"/>
-      <path className="door-leaf double-door-leaf" d={openingFace(o,0,half,0,doorHeight)} fill="#c4a274" stroke="#827b5a" strokeWidth="1.7"/>
-      <path d={openingFace(o,0,0,0,doorHeight)} fill="none" stroke="#827b5a" strokeWidth="1.4"/>
-    </g>
+    {[-1,1].map((side,i)=>{
+      const hinge=openingPoint(o,side*half),length=-side*half;
+      const leaf={...o,...hinge,angle:(o.angle||0)+(o.open?-side*70:0)};
+      const knob=openingPoint(leaf,length*.84,doorHeight*.45);
+      return <g key={side} className={side<0?'double-door-leaf-left':'double-door-leaf-right'} clipPath={`${leafMask.slice(0,-1)}-${i})`} data-plan-angle={leaf.angle}>
+        {height>18&&<><path className="door-leaf double-door-leaf" d={openingFace(leaf,0,length,0,doorHeight)} fill="#c4a274" stroke="#827b5a" strokeWidth="1.7"/>
+          <path d={openingFace(leaf,length*.12,length*.88,7,doorHeight-6)} fill="none" stroke="#a78d65" strokeWidth="1"/>
+          <circle cx={knob.x} cy={knob.y} r="1.6" fill="#ecdaa5" stroke="#8e8058" strokeWidth=".7"/></>}
+        <path className="double-door-top" d={openingBand(leaf,0,length,height>18?doorHeight:0,1.7)} fill="#d8c29a" stroke="#827b5a" strokeWidth="1.2"/>
+      </g>;
+    })}
   </g>;
 }
 function RoomOpening({opening:o,height,onDoor,mask,leafMask,portalClip}){
   const upright=height>18,doorHeight=Math.max(8,height-9);
-  if(o.type==='door'&&o.doorSpan>42&&upright)return <DoubleDoor opening={o} onDoor={onDoor} mask={mask} leafMask={leafMask} portalClip={portalClip}/>;
+  if(o.type==='door'&&o.doorSpan>42)return <DoubleDoor opening={o} onDoor={onDoor} mask={mask} leafMask={leafMask}/>;
   const hinge=openingPoint(o,-20),leafAngle=(o.angle||0)+(o.open?70:0);
   const leaf={...o,x:hinge.x,y:hinge.y,angle:leafAngle};
   if(sideOpening(o)&&o.type==='door'&&upright)return <SideDoor opening={o} onDoor={onDoor} mask={mask} leafMask={leafMask}/>;
@@ -91,18 +100,18 @@ function RoomOpening({opening:o,height,onDoor,mask,leafMask,portalClip}){
   </g>;
 }
 
-export function TopDownRoom({home,onDoor}){
+export function TopDownRoom({home,onDoor,onStairDown,showLabels=true,floorVoids=[]}){
   const maskId=`room-opening-depth-${useId().replace(/:/g,'')}`;
   const mesh=useMemo(()=>buildRoomWalls(home),[home.boundary,home.outlines,home.holes,home.walls,home.openings]);
   // buildRoomWalls already normalizes adjacent windows into one span. Reusing
   // that list here keeps the decorated pane identical to the floor-plan cutout.
-  const openings=useMemo(()=>combineDoorPairs(mesh.openings).map(o=>({...o,occlusion:wallGeometryPath(openingOccluders(mesh,o)),leafOcclusion:wallGeometryPath(openingOccluders(mesh,o,{leaf:true}))})),[mesh]);
+  const openings=useMemo(()=>mesh.openings.map(o=>({...o,occlusion:wallGeometryPath(openingOccluders(mesh,o)),leafOcclusion:wallGeometryPath(openingOccluders(mesh,o,{leaf:true})),pairedLeafOcclusions:o.doorSpan>42?[-1,1].map(side=>wallGeometryPath(openingOccluders(mesh,o,{leaf:true,hingeAlong:side*o.doorSpan/2,leafLength:-side*o.doorSpan/2,swing:-side*70}))):[]})),[mesh]);
   if(!home.boundary.length)return null;
-  const outline=[...floorOutlines(home),...(home.holes||[])].map(r=>pathOf(r)+' Z').join(' ');
+  const outline=floorVoids.length?wallGeometryPath(clipping.difference(floorOutlines(home).map(r=>[r.map(p=>[p.x,p.y])]),...[...(home.holes||[]),...floorVoids].map(r=>[r.map(p=>[p.x,p.y])]))):[...floorOutlines(home),...(home.holes||[])].map(r=>pathOf(r)+' Z').join(' ');
   const floor={oak:'#d8b98c',birch:'#e9d5ae',tile:'#bdc9ad',rose:'#c3a092'}[home.floor];
   return <g className="topdown-room" strokeLinecap="round" strokeLinejoin="round">
     <defs>
-      <pattern id="room-floorboards" width="80" height="28" patternUnits="userSpaceOnUse">
+      <pattern id={`${maskId}-floorboards`} width="80" height="28" patternUnits="userSpaceOnUse">
         <rect width="80" height="28" fill={floor}/>
         <path d={home.floor==='tile'?'M0 0H80V28H0ZM40 0v28':'M0 0H80V28H0M40 0v14M0 14h80M16 14v14M62 14v14'} fill="none" stroke="#957b59" strokeWidth=".75" opacity=".42"/>
         {home.floor!=='tile'&&<path d="M6 6h22m22 3h17M24 21h23" stroke="#fff6df" strokeWidth=".9" opacity=".24"/>}
@@ -110,9 +119,12 @@ export function TopDownRoom({home,onDoor}){
       {openings.flatMap((o,i)=>[false,true].map(leaf=><clipPath key={`${o.id}-${leaf}`} id={`${maskId}-${i}${leaf?'-leaf':''}`} clipPathUnits="userSpaceOnUse">
         <path className="opening-visible-region" d={`M-10000-10000H10000V10000H-10000Z ${leaf?o.leafOcclusion:o.occlusion}`} clipRule="evenodd"/>
       </clipPath>))}
+      {openings.flatMap((o,i)=>o.pairedLeafOcclusions.map((occlusion,j)=><clipPath key={`${o.id}-pair-${j}`} id={`${maskId}-${i}-leaf-${j}`} clipPathUnits="userSpaceOnUse"><path d={`M-10000-10000H10000V10000H-10000Z ${occlusion}`} clipRule="evenodd"/></clipPath>))}
       {openings.filter(o=>o.type==='door'&&!sideOpening(o)&&o.height>18).map(o=><clipPath key={`${o.id}-portal`} id={`${maskId}-${openings.indexOf(o)}-portal`} clipPathUnits="userSpaceOnUse"><path className="doorway-leaf-limit" d={openingFace(o,-21,21,0,o.height-8)}/></clipPath>)}
     </defs>
-    <path className="topdown-floor" d={outline} fill="url(#room-floorboards)" fillRule="evenodd"/>
+    <path className="topdown-floor" d={outline} fill={`url(#${maskId}-floorboards)`} fillRule="evenodd"/>
+    {floorVoids.map((ring,i)=><path key={i} className="stairwell-rim" d={pathOf(ring)+' Z'} fill="none" stroke="#879577" strokeWidth="3" pointerEvents="none"/>)}
+    {(home.stairs||[]).map(s=><StairObject key={s.id} stair={s} decorated onPointerDown={onStairDown}/>)}
     <g className="topdown-walls" pointerEvents="none">
       <g className="wall-faces" fill={home.wallColor}>
         {mesh.surfaces.filter(s=>s.kind==='face'&&!s.rimReturn).map((surface,i)=><path key={i} className="wall-face" data-height={surface.height} d={wallGeometryPath(surface.geometry)} fillRule="evenodd"/>)}
@@ -124,6 +136,7 @@ export function TopDownRoom({home,onDoor}){
       <path className="wall-silhouette" d={wallGeometryPath(mesh.silhouette)} fill="none" stroke="#748164" strokeWidth="1.6"/>
     </g>
     {[...openings].sort((a,b)=>a.y-b.y).map(o=>{const id=`${maskId}-${openings.indexOf(o)}`;return <g key={o.id} className="depth-sorted-opening" data-plan-depth={o.y}><RoomOpening opening={o} height={o.height} onDoor={onDoor} mask={`url(#${id})`} leafMask={`url(#${id}-leaf)`} portalClip={`url(#${id}-portal)`}/></g>;})}
+    {showLabels&&<LevelLabels home={home} raised/>}
   </g>;
 }
 

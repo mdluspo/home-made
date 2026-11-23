@@ -6,6 +6,29 @@ import { deleteSelection, emptySelection, moveSelection, outlineBounds, outlineC
 const rect=(x,y,w,h)=>rectangleFromPoints({x,y},{x:x+w,y:y+h});
 const base=()=>normalizePlan(addFloorSection(initialHome(),rect(100,150,200,200),'rectangle'));
 const add=(home,points,type='rectangle')=>normalizePlan(addFloorSection(home,points,type));
+
+test('floor numbers follow persistent creation identity, not polygon area or position',()=>{
+  let home=base();
+  for(let i=1;i<7;i++)home=add(home,rect(100+i*700,150,80+i*25,100));
+  const before=new Map(home.sections.map(s=>[s.id,s.level]));
+  assert.deepEqual([...before.values()],[1,2,3,4,5,6,7]);
+  home=add(home,rect(-1600,-500,1200,1100));
+  for(const [id,level] of before)assert.equal(home.sections.find(s=>s.id===id).level,level);
+  assert.equal(home.sections.at(-1).level,8);
+  assert.equal(home.floorLevels[0],8,'the largest polygon renders first, but is still Level 8');
+  assert.deepEqual(normalizePlan(JSON.parse(JSON.stringify(home))),home,'saved identities survive reload and repeated normalization');
+});
+
+test('joining two floors retains the base number and does not renumber unrelated floors',()=>{
+  let home=add(add(base(),rect(500,150,200,200)),rect(900,150,200,200));
+  const third=home.sections[2].id,second=home.sections[1].id;
+  home=moveSelection(home,{...emptySelection(),sections:[second]},{x:-200,y:0});
+  assert.equal(home.sections.find(s=>s.id===third).level,3);
+  assert.equal(home.sections.find(s=>s.id===second).level,1);
+  home=add(home,rect(1500,150,200,200));
+  assert.equal(home.sections.at(-1).level,4);
+  assert.equal(home.sections.find(s=>s.id===third).level,3);
+});
 test('placing a detached floor-plan section keeps both independent shapes',()=>{
   const home=add(base(),rect(500,150,200,200));
   assert.equal(home.sections.length,2);assert.equal(home.outlines.length,2);

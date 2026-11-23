@@ -1,11 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {initialHome,normalizePlan,pointInPolygon,rectangleFromPoints,distanceToSegment} from '../src/model.js';
-import {buildRoomWalls,openingOccluders,wallGeometryPath} from '../src/roomWalls.js';
+import {buildRoomWalls,combineDoorPairs,openingOccluders,wallGeometryPath} from '../src/roomWalls.js';
 
 const rectangle=(a,b)=>rectangleFromPoints(a,b);
 const contains=(geometry,p)=>geometry.some(poly=>pointInPolygon(p,poly[0].map(([x,y])=>({x,y})))&&!poly.slice(1).some(r=>pointInPolygon(p,r.map(([x,y])=>({x,y})))));
 const homeWith=walls=>normalizePlan({...initialHome(),boundary:rectangle({x:100,y:100},{x:700,y:500}),walls});
+
+test('an already paired doorway keeps its full cutout and both IDs on subsequent rendering passes',()=>{
+  const home=homeWith([]);
+  home.openings=[{id:'left',type:'door',x:379,y:100,angle:0},{id:'right',type:'door',x:421,y:100,angle:0}];
+  const mesh=buildRoomWalls(home),[door]=mesh.openings;
+  assert.equal(mesh.openings.length,1);
+  assert.equal(door.doorSpan,84);
+  assert.deepEqual(door.doorIds,['left','right']);
+  assert.deepEqual(combineDoorPairs(mesh.openings),mesh.openings);
+  for(const x of [370,430])assert.equal(mesh.surfaces.some(s=>contains(s.geometry,{x,y:70})),false,'both halves of the supporting wall are cut out');
+});
 
 test('a divider T joint becomes a single cap without a line through the junction',()=>{
   const mesh=buildRoomWalls(homeWith([{id:'divider',points:[{x:400,y:100},{x:400,y:500}]}]));

@@ -6,7 +6,28 @@
   --kit-warm: #dfc384;
   --kit-shadow: #566043;
 }
+.sticker-upload-overlay{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;padding:28px calc(340px + 28px) 28px 28px;background:#5664453d;backdrop-filter:blur(6px)}.is-uploading .library-panel{position:relative;z-index:51}.sticker-upload-card{width:min(620px,100%);padding:22px 28px 24px;background:#fcfaef;border:1px solid #c7d2b3;border-radius:16px;box-shadow:0 15px 80px #3f522c30;text-align:center}.sticker-upload-card h2{margin:7px 0 12px;font-family:var(--hand);font-size:30px;color:#73865e}.sticker-upload-card .sticker-preview{height:270px;margin:10px auto 15px;max-width:520px}.sticker-upload-card .sticker-preview img{max-width:82%;max-height:82%}.sticker-name-label{text-align:left;margin:0}.sticker-upload-options{display:flex;align-items:center;justify-content:center;gap:8px;margin:12px 0;color:#899979;font-size:10px}.sticker-upload-actions{display:flex;justify-content:center;gap:10px;margin-top:15px}.sticker-upload-actions .button{min-width:110px}.sticker-upload-actions .button.primary:disabled{opacity:.4}
+.level-label{font-size:14px;letter-spacing:2px;font-weight:600;fill:#7d8b6c;pointer-events:none}.wall-inspector{position:absolute;top:68px;left:50%;transform:translateX(-50%);z-index:5;display:flex;align-items:center;gap:10px;padding:8px 12px;background:#fbf9e9ee;border:1px solid #d4dcc2;border-radius:8px;color:#7a8966;font-size:10px;box-shadow:0 2px 9px #506d3e17}.wall-inspector strong{font-weight:600}.wall-inspector label{display:flex;align-items:center;gap:6px}.wall-inspector input{width:110px;accent-color:#7c9965}.wall-inspector button{font:inherit;color:#7a8966;border:0;background:transparent;padding:2px 4px;cursor:pointer}
 .app button { transition: background-color .12s, color .12s, transform .12s; }
+.floor-switcher{position:absolute;z-index:16;isolation:isolate;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 7px;min-width:54px;--frame-paper:#faf5e4;--frame-ink:#8a9b73;color:#667a53}
+.floor-switcher .floor-level-buttons{display:flex;flex-direction:column;gap:3px;max-height:180px;overflow:auto;width:100%;padding:2px}
+.floor-level-buttons button{display:flex;align-items:center;justify-content:center;gap:5px;min-height:30px;padding:5px 6px;border-radius:5px;font-size:12px;font-weight:600}
+.floor-level-buttons button.active{background:#dce6c8;color:#516b40;box-shadow:inset 0 0 0 1px #a6ba8e}
+.floor-switcher .rail-divider{width:24px;min-height:1px;flex-shrink:0}
+.floor-overview{position:absolute;inset:92px 95px 90px;z-index:18;padding:20px 24px;background:#f6f4e7f5;border:1px solid #a9b597;border-radius:9px;display:flex;flex-direction:column;gap:16px;box-shadow:0 5px 24px #5c705c15;overflow:auto}
+.floor-overview header,.floor-overview footer{display:flex;justify-content:space-between;align-items:center;gap:14px;color:#728363}
+.floor-overview h2{font-family:var(--hand);font-size:29px}.floor-overview small{font-size:8px;letter-spacing:2px}.floor-overview footer{justify-content:center;font-size:11px}
+.floor-overview-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(2,minmax(100px,1fr));gap:14px;min-height:0;flex:1}
+.floor-sheet{display:flex;flex-direction:column;align-items:center;border:1px solid #d2d8c2;border-radius:6px;padding:12px 8px 7px;background:#fdfbf399;min-height:120px;min-width:0;color:#708360}
+.floor-sheet.active{border-color:#88a66d;box-shadow:0 0 0 1px #a7bb8a}.floor-sheet strong{font-size:12px}.floor-sheet svg{width:100%;height:100%;min-height:0;flex:1}
+.stair-inspector{position:absolute;top:95px;left:50%;transform:translateX(-50%);z-index:17;isolation:isolate;display:flex;align-items:center;gap:8px;padding:10px 13px;color:#667a53;--frame-paper:#faf5e4;--frame-ink:#8a9b73}
+.stair-inspector label{display:flex;align-items:center;gap:7px;font-size:10px}.stair-inspector select{max-width:145px;padding:6px;border:1px solid #c4cead;border-radius:5px;background:#fdf9e9;font-size:11px}.stair-inspector input{width:75px;accent-color:#8caa72}
+.new-floor-prompt{position:absolute;top:130px;left:50%;transform:translateX(-50%);color:#657f50;background:#fdf9e9e8;padding:10px 16px;border:1px dashed #a1b48d;border-radius:7px;font-size:13px;display:flex;gap:20px;align-items:center}.new-floor-prompt button{font-size:11px;text-decoration:underline}
+.stair-object{cursor:grab}.stair-object:active{cursor:grabbing}
+.adjacent-floor *{pointer-events:none!important}
+.app .interaction-prompt.stair-travel-prompt{display:flex!important}
+@media(max-width:760px){.floor-overview{inset:100px 20px 90px;padding:12px}.floor-overview-grid{gap:8px}.stair-inspector{top:102px;gap:4px;padding:8px;max-width:calc(100% - 36px)}.stair-inspector input{width:55px}.floor-switcher{min-width:45px;padding:6px 4px}.floor-level-buttons{max-height:120px!important}}
+.furniture-name-row{display:flex;align-items:center;gap:4px;min-width:0;padding:4px 7px 0 10px}.furniture-name-row .furniture-name{padding:0;flex:1;min-width:0}.sticker-rename-button{width:20px;height:20px;display:grid;place-items:center;flex-shrink:0;color:#84956f;border-radius:4px}.sticker-rename-button:hover{background:#e4ead8;color:#657c51}.sticker-rename-button svg{width:12px;height:12px}
 .app button:focus-visible { outline: 2px solid #77613a; outline-offset: 4px; }
 .app .workspace.building { background-color: #eeeee2; }
 .app .sketch-frame {
@@ -584,4 +605,49 @@
   .app .library-panel .library-scroll { inset: 41px 12px 19px 19px; }
   .app .library-panel .shelf-tabs { gap: 8px; }
   .app .library-panel .shelf-tabs button { font-size: 11px; }
+}
+
+/* Naming is a floating sticker, not another paper panel or checkerboard. */
+.sticker-upload-overlay {
+  --sticker-menu-space: 422px;
+  padding: 24px calc(var(--sticker-menu-space) + 24px) 24px 24px;
+  background: #59674424;
+  backdrop-filter: blur(7px);
+}
+.app.is-uploading .library-panel { position: absolute; z-index: 51; pointer-events: none; }
+.app.is-uploading .game-hud { z-index: 51; }
+.app.is-uploading .game-hud button { pointer-events: none; }
+.sticker-upload-card {
+  width: min(560px, 100%); max-height: calc(100dvh - 48px); overflow: auto;
+  padding: 0; background: transparent; border: 0; border-radius: 0;
+  box-shadow: none; outline: none;
+}
+.sticker-floating-preview {
+  height: min(42dvh, 340px); display: flex; align-items: center; justify-content: center;
+  margin-bottom: 22px; background: none; border: 0;
+}
+.sticker-floating-preview img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
+.sticker-name-input {
+  width: 100%; padding: 13px 17px; border: 1px solid #9aaa83; border-radius: 12px;
+  background: #fffdf1ee; color: #526546; font-size: 14px;
+}
+.sticker-upload-options { font-size: 12px; cursor: pointer; color: #526546; margin: 16px 0; }
+.sticker-upload-options input { width: 17px; height: 17px; accent-color: #829767; }
+.sticker-upload-actions { justify-content: space-between; gap: 24px; margin-top: 18px; }
+.sticker-upload-actions .button { border-radius: 999px; min-width: 126px; font-size: 13px; padding: 12px 24px; }
+.app .furniture-place-button { display: block; width: 100%; padding: 0; }
+.app .furniture-name-row { min-width: 0; gap: 5px; padding: 3px 9px 0; }
+.app .furniture-name-row .furniture-name {
+  display: block; text-align: left; min-width: 0; flex: 1; padding: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.app .sticker-rename-button { flex: 0 0 22px; width: 22px; height: 22px; padding: 2px; }
+.app .sticker-rename-button svg { width: 14px; height: 14px; }
+.level-titles .level-label { font-size: 18px; font-weight: 700; letter-spacing: 1px; fill: #526b41; }
+@media (max-width: 1100px) { .sticker-upload-overlay { --sticker-menu-space: 402px; } }
+@media (max-width: 760px) {
+  .sticker-upload-overlay { --sticker-menu-space: 0px; padding: 100px 24px 24px; }
+  .sticker-upload-card { width: min(480px, 100%); }
+  .app.is-uploading .library-panel { z-index: 25; }
+  .sticker-upload-actions .button { min-width: 100px; }
 }

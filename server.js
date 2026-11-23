@@ -147,7 +147,7 @@ wss.on('connection', (ws, req) => {
         if (msg.version !== home.version) return send(ws, 'conflict', { state: home.state, version: home.version });
         if (!validateHome(msg.state)) return send(ws, 'error', { message: 'That change could not be saved. Try a smaller image or fewer objects.' });
         if (ws.role === 'decorator') {
-          for (const key of ['boundary', 'sections', 'removedJoins', 'walls', 'openings', 'wallColor', 'floor', 'name']) if (JSON.stringify(msg.state[key]) !== JSON.stringify(home.state[key])) return send(ws, 'error', { message: 'Only builders can change the floor plan.' });
+          for (const key of ['boundary', 'sections', 'removedJoins', 'walls', 'openings', 'stairs', 'wallColor', 'floor', 'name']) if (JSON.stringify(msg.state[key]) !== JSON.stringify(home.state[key])) return send(ws, 'error', { message: 'Only builders can change the floor plan.' });
         }
         home.state = normalizePlan(msg.state); home.version++;
         persist();

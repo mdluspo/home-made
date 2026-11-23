@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Armchair, ArrowDown, ArrowDownToLine, ArrowLeft, ArrowRight, ArrowUp, BookOpen, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Coffee, Copy, DoorOpen, Download, Expand, Eye, FlipHorizontal2, Flower2, Grid2X2, Hammer, Hand, Heart, House, ImagePlus, Layers, Leaf as LeafIcon, Lightbulb, Link, LoaderCircle, LockKeyhole, Menu, MessageCircle, Minus, Moon, MousePointer2, Move, Paintbrush, Pencil, Plus, Redo2, RotateCcw, RotateCw, Save, Search, Send, Settings2, ShieldCheck, Sparkles, Sprout, Square, Sun, Trash2, Undo2, Upload, Users, Wallpaper, Wind, X } from 'lucide-react';
 import { Character, Leaf } from './Art.jsx';
@@ -10,6 +10,9 @@ import { GameIcon } from './GameIcons.jsx';
 import { SketchFrame, RulerMarks } from './SketchFrame.jsx';
 import { FurnitureSelection, TopDownCharacter, TopDownFurniture, TopDownPreview, TopDownRoom } from './TopDown.jsx';
 import { FurnitureToolbar } from './FurnitureToolbar.jsx';
+import {FurnitureCard,StickerDialog} from './StickerDialog.jsx';
+import {FloorStack,FloorSwitcher,FloorOverview,StairInspector} from './FloorViews.jsx';
+import {floorAtPoint,floorHome,stackLayers,stairTravel} from './floors.js';
 import { boxFromPoints, deleteSelection, emptySelection, mergeSelection, moveSelection, moveVertex, resizeOutline, selectInBox, selectionBounds, selectionCount, transformFurniture } from './editor.js';
 import { useWorld } from './useWorld.js';
 import './styles.css';
@@ -58,6 +61,9 @@ function App() {
   const world = useWorld(notify);
   const { home, homeId, profile, role, players, status, commit, undo, redo, history } = world;
   const [mode, setMode] = useState('build');
+  const [activeLevel,setActiveLevel]=useState(1);
+  const [floorOverview,setFloorOverview]=useState(false);
+  const [draftFloor,setDraftFloor]=useState(null);
   const [page, setPage] = useState('home');
   const [category, setCategory] = useState('All pieces');
   const [query, setQuery] = useState('');
@@ -72,6 +78,30 @@ function App() {
   const [shelf,setShelf]=useState('collection');
   const [menuOpen, setMenuOpen] = useState(false);
   const [zoom, setZoom] = useState(1);
+  const adjustZoom=useCallback(direction=>setZoom(z=>Math.max(.2,Math.min(3,Math.round((z+direction*.1)*10)/10))),[]);
+  useEffect(()=>{
+    // Native browser/desktop-host zoom can consume Ctrl +/- before a web page
+    // receives keydown. Its CSS viewport then shrinks, and SVG's fixed viewBox
+    // auto-fit cancels the scene's visual zoom. Carry that DPI change into the
+    // same scene zoom used by the ruler so floors and UI both respond.
+    let previousRatio=window.devicePixelRatio||1,resolution;
+    const syncBrowserZoom=()=>{
+      const nextRatio=window.devicePixelRatio||1;
+      if(Math.abs(nextRatio-previousRatio)<.0001)return;
+      const factor=nextRatio/previousRatio;
+      previousRatio=nextRatio;
+      setZoom(z=>Math.max(.2,Math.min(3,Math.round(z*factor*1000)/1000)));
+      watchResolution();
+    };
+    const watchResolution=()=>{
+      resolution?.removeEventListener('change',syncBrowserZoom);
+      resolution=window.matchMedia(`(resolution: ${previousRatio}dppx)`);
+      resolution.addEventListener('change',syncBrowserZoom);
+    };
+    watchResolution();
+    window.addEventListener('resize',syncBrowserZoom);
+    return()=>{window.removeEventListener('resize',syncBrowserZoom);resolution?.removeEventListener('change',syncBrowserZoom);};
+  },[]);
   const [camera,setCamera]=useState({x:0,y:0});
   const [panning,setPanning]=useState(false);
   const [modal, setModal] = useState(null);
@@ -91,13 +121,23 @@ function App() {
   const [profileColor, setProfileColor] = useState('#a2ad83');
   const [upload, setUpload] = useState(null);
   const [removeBg, setRemoveBg] = useState(true);
+  const [editingStickerId, setEditingStickerId] = useState(null);
+  const [editingStickerName, setEditingStickerName] = useState('');
   const [busy, setBusy] = useState(false);
   const svgRef = useRef(), groupRef = useRef(), workspaceRef = useRef(), fileRef = useRef();
   const dragging = useRef(null), drawing = useRef(null), polygonDraft = useRef([]), latestPoint = useRef(position), keys = useRef(new Set()), latest = useRef({ home, mode, page });
   const marqueeRef=useRef(null);
   const floorClickRef=useRef(null);
   const cameraDrag=useRef(null),suppressContextUntil=useRef(0);
-  latest.current = { home, mode, page }; latestPoint.current = position;
+  const visibleHome=preview?.home||home;
+  const floorLayers=useMemo(()=>stackLayers(visibleHome,activeLevel),[visibleHome,activeLevel]);
+  const activeHome=useMemo(()=>floorHome(visibleHome,draftFloor?null:floorLayers.active),[visibleHome,floorLayers.active,draftFloor]);
+  const floorShift=draftFloor?{x:(floorLayers.floors[0]?.x||0)-draftFloor.x,y:(floorLayers.floors[0]?.y||0)-draftFloor.y}:floorLayers.offset;
+  latest.current = { home:activeHome, fullHome:home, activeLevel, mode, page }; latestPoint.current = position;
+  useEffect(()=>{
+    if(draftFloor){if(floorLayers.floors.some(f=>f.level===activeLevel))setDraftFloor(null);return;}
+    if(floorLayers.active&&floorLayers.active.level!==activeLevel)setActiveLevel(floorLayers.active.level);
+  },[floorLayers,activeLevel,draftFloor]);
   const editable = ['owner', 'builder', 'decorator'].includes(role);
   const buildable = ['owner', 'builder'].includes(role);
   const selectedItem = home.items.find(i => i.id === selected);
@@ -127,7 +167,7 @@ function App() {
     if (next === 'decorate' && !editable) return notify('You’re here to enjoy the view. Ask the owner for decorating permission.');
     if(next!=='build'&&home.boundary.length<3) return notify('Draw your home’s outline first. Start with a rectangle or a custom shape.');
     setMode(next); setTool('select'); setSelected(null); setSelectedWall(null);setSelection(emptySelection()); setSitting(false); setPage('home');setPanelOpen(false);setMenuOpen(false);polygonDraft.current=[];setStroke([]);
-    if(next==='explore') setPosition(homeSpawn(home));
+    if(next==='explore') setPosition(homeSpawn(activeHome));
   };
   const pointFromEvent = (e,raw=false) => {
     const p = svgRef.current.createSVGPoint(); p.x = e.clientX; p.y = e.clientY;
@@ -139,7 +179,7 @@ function App() {
     if (!editable) return notify('Ask the homeowner for decorating permission to add a piece.');
     if(home.boundary.length<3)return notify('Build a space for your things first. Draw your home’s outline in Build mode.');
     if (home.items.length >= 300) return notify('Your home is full of lovely things. Remove a piece to make room.');
-    const spawn=homeSpawn(home);
+    const spawn=homeSpawn(activeHome);
     const item = { id: makeId(), type, x: point?.x ?? spawn.x, y: point?.y ?? spawn.y, scale: 1, rotation: 0 };
     commit(h => ({ ...h, items: [...h.items, item] }));
     setSelected(item.id);setSelection({...emptySelection(),items:[item.id]}); setMode('decorate'); setPage('home'); setTool('select');
@@ -179,7 +219,7 @@ function App() {
     if (e.button !== 0) return;
     const p = pointFromEvent(e);
     if (mode === 'explore') {
-      if (canMove(p, home)) { setPosition(p); latestPoint.current=p; world.send({ type: 'move', ...p }); setSitting(false); }
+      if (canMove(p, activeHome)) { setPosition(p); latestPoint.current=p; world.send({ type: 'move', ...p }); setSitting(false); }
       return;
     }
     if(mode==='build'&&tool==='polygon'&&buildable){
@@ -199,6 +239,16 @@ function App() {
       if (nearbyDoors.some(o => Math.hypot(o.x-nearest.point.x,o.y-nearest.point.y) < 18)) return notify('That door is already occupied. Move it a little farther away.');
       if (nearbyDoors.length >= 2) return notify('A doorway can have at most two doors side by side.');
       commit(h => ({ ...h, openings: [...h.openings, { id: makeId(), type: tool, ...nearest.point, angle: nearest.angle, open: false }] })); return;
+    }
+    if (mode === 'build' && tool.startsWith('stairs') && buildable) {
+      floorClickRef.current=null;
+      const floor=floorAtPoint(home,p);
+      if (!floor) return notify('Place the stairs inside a floor plan.');
+      const kind=tool==='stairs'?'straight':tool.slice(7);
+      const stair={id:makeId(),kind,x:p.x,y:p.y,rotation:0,scale:1,toLevel:floorLayers.floors.find(f=>f.level>floor.level)?.level||home.nextLevel||floor.level+1};
+      commit(h => ({ ...h, stairs: [...(h.stairs || []),stair] }));
+      setTool('select');setSelection({...emptySelection(),stairs:[stair.id]});
+      return;
     }
     if(tool==='select'&&editable){
       const raw=pointFromEvent(e,true);
@@ -257,7 +307,7 @@ function App() {
     }
     if(marqueeRef.current){
       const m=marqueeRef.current,rect=boxFromPoints(m.start,m.end);
-      const next=rect.width>3||rect.height>3?mergeSelection(m.base,selectInBox(home,rect,mode)):m.base;
+      const next=rect.width>3||rect.height>3?mergeSelection(m.base,selectInBox(activeHome,rect,mode)):m.base;
       setSelection(next);setSelected(next.items.length===1&&!next.boundary&&!next.walls.length&&!next.sections.length?next.items[0]:null);setSelectedWall(next.sections.length===1?`section:${next.sections[0]}`:next.boundary&&!next.walls.length?'boundary':next.walls.length===1&&!next.boundary?next.walls[0]:null);
       marqueeRef.current=null;setMarquee(null);return;
     }
@@ -300,6 +350,12 @@ function App() {
     setSelected(item.id);
     if (item.locked) {setSelection({...emptySelection(),items:[item.id]});return;}
     startGroupDrag(e,selection.items.includes(item.id)?selection:{...emptySelection(),items:[item.id]});
+  };
+  const onStairDown=(e,stair)=>{
+    if(e.button!==0||mode==='explore'||!buildable)return;
+    e.stopPropagation();setTool('select');setSelected(null);setSelectedWall(null);
+    if(e.shiftKey){toggleSelected('stairs',stair.id);return;}
+    startGroupDrag(e,selection.stairs?.includes(stair.id)?selection:{...emptySelection(),stairs:[stair.id]});
   };
   const startWallDrag = (e,wall,handle) => {
     if (e.button!==0 || mode!=='build' || !buildable) return;
@@ -351,6 +407,8 @@ function App() {
   };
   const interact = useCallback(() => {
     const h=latest.current.home, p=latestPoint.current;
+    const travel=stairTravel(latest.current.fullHome,latest.current.activeLevel,p);
+    if(travel){setActiveLevel(travel.level);setPosition(travel.position);latestPoint.current=travel.position;setSitting(false);world.send({type:'move',...travel.position});return;}
     const opening=h.openings.find(o=>o.type==='door'&&Math.hypot(o.x-p.x,o.y-p.y)<70);
     if(opening) {
       if(!['owner','builder'].includes(role)) return notify('The homeowner controls this door.');
@@ -363,22 +421,31 @@ function App() {
       else if(near.type==='art') notify('“A sunny little day” — a reminder to notice the little things.');
       else {setSitting(s=>!s);notify(near.type==='bed'?'Just five more minutes…':'Settle in. You’re home.');}
     } else notify('Walk closer to a chair, bed, or one of your little treasures.');
-  },[role,commit,notify]);
+  },[role,commit,notify,world.send]);
+  useEffect(()=>{
+    if(page!=='home')return;
+    const onZoomKey=e=>{
+      if(!(e.ctrlKey||e.metaKey)||e.altKey)return;
+      const out=['-','_'].includes(e.key)||['Minus','NumpadSubtract'].includes(e.code);
+      const into=['+','='].includes(e.key)||['Equal','NumpadAdd'].includes(e.code);
+      const reset=e.key==='0'||e.code==='Digit0'||e.code==='Numpad0';
+      if(!out&&!into&&!reset)return;
+      // Capture before focused controls and suppress native browser/UI zoom.
+      e.preventDefault();e.stopPropagation();
+      if(reset){setZoom(1);setCamera({x:0,y:0});}else adjustZoom(out?-1:1);
+    };
+    window.addEventListener('keydown',onZoomKey,{capture:true});
+    return()=>window.removeEventListener('keydown',onZoomKey,{capture:true});
+  },[page,adjustZoom]);
   useEffect(()=>{
     const keydown=e=>{
       if(['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)||e.target.isContentEditable) return;
-      if(modal) return;
-      if((e.ctrlKey||e.metaKey)&&(e.key==='-'||e.key==='_'||e.key==='+'||e.key==='='||e.code==='NumpadSubtract'||e.code==='NumpadAdd')&&page==='home'){
-        e.preventDefault();
-        const zoomOut=e.key==='-'||e.key==='_'||e.code==='NumpadSubtract';
-        setZoom(z=>Math.max(.6,Math.min(1.7,Math.round((z+(zoomOut?-.1:.1))*10)/10)));
-        return;
-      }
+      if(modal||editingStickerId) return;
       if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'&&editable){e.preventDefault();e.shiftKey?redo():undo();return;}
       if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='d'&&mode==='decorate'){e.preventDefault();duplicate();return;}
       if((e.key==='Delete'||e.key==='Backspace')&&mode!=='explore'&&page==='home'){e.preventDefault();removeSelected();}
       if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='a'&&page==='home'&&mode!=='explore'){
-        e.preventDefault();setTool('select');setSelectedWall(null);setSelected(null);setSelection({boundary:mode==='build'&&home.boundary.length>2,sections:[],walls:mode==='build'?home.walls.map(w=>w.id):[],items:home.items.filter(i=>!i.locked).map(i=>i.id),openings:mode==='build'?home.openings.map(o=>o.id):[]});
+        e.preventDefault();setTool('select');setSelectedWall(null);setSelected(null);setSelection({boundary:false,sections:mode==='build'?activeHome.sections.map(s=>s.id):[],walls:mode==='build'?activeHome.walls.map(w=>w.id):[],items:activeHome.items.filter(i=>!i.locked).map(i=>i.id),openings:mode==='build'?activeHome.openings.map(o=>o.id):[],stairs:(activeHome.stairs||[]).map(s=>s.id)});
       }
       if(e.key.toLowerCase()==='v'&&!e.ctrlKey&&!e.metaKey&&mode!=='explore')setTool('select');
       if(e.key==='Escape'){floorClickRef.current=null;setFloorContext(null);setSelected(null);setSelectedWall(null);setSelection(emptySelection());setTool('select');polygonDraft.current=[];setStroke([]);marqueeRef.current=null;setMarquee(null);dragging.current=null;setPreview(null);}
@@ -391,7 +458,7 @@ function App() {
     const clear=()=>keys.current.clear();
     window.addEventListener('keydown',keydown);window.addEventListener('keyup',keyup);window.addEventListener('blur',clear);
     return()=>{window.removeEventListener('keydown',keydown);window.removeEventListener('keyup',keyup);window.removeEventListener('blur',clear);keys.current.clear();};
-  },[mode,page,modal,editable,undo,redo,duplicate,removeSelected,interact,home]);
+  },[mode,page,modal,editingStickerId,editable,undo,redo,duplicate,removeSelected,interact,home,activeHome]);
   useEffect(()=>{
     let frame,lastTime=performance.now(),lastSend=0;
     const tick=time=>{
@@ -439,7 +506,7 @@ function App() {
     const file=e.target.files?.[0];e.target.value='';if(!file)return;
     if(!['image/png','image/jpeg','image/webp'].includes(file.type))return notify('Choose a PNG, JPG, or WebP image.');
     if(file.size>15*1024*1024)return notify('Choose an image smaller than 15 MB.');
-    setBusy(true);setModal('upload');setUpload(null);setRemoveBg(true);
+    setBusy(true);setModal('upload');setUpload(null);setRemoveBg(true);setPanelOpen(true);setPage('home');setMode('decorate');
     try{
       const source=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file);});
       const img=await new Promise((resolve,reject)=>{const i=new Image();i.onload=()=>resolve(i);i.onerror=reject;i.src=source;});
@@ -456,14 +523,20 @@ function App() {
       let head=0;
       while(head<queue.length){const n=queue[head++],i=n*4;const diff=Math.hypot(pixels[i]-bg[0],pixels[i+1]-bg[1],pixels[i+2]-bg[2]);if(diff>85&&pixels[i+3]>10)continue;pixels[i+3]=diff<45?0:Math.round(pixels[i+3]*(diff-45)/40);const x=n%w,y=Math.floor(n/w);push(x-1,y);push(x+1,y);push(x,y-1);push(x,y+1);}
       ctx.putImageData(data,0,0);
-      setUpload({name:file.name.replace(/\.[^.]+$/,'').slice(0,40),original,processed:canvas.toDataURL('image/png')});
+      setUpload({name:'',original,processed:canvas.toDataURL('image/png')});
     }catch{notify('That image couldn’t be opened. Try another one.');setModal(null);}finally{setBusy(false);}
   };
   const saveUpload=()=>{
-    if(!upload)return;
+    if(!upload||!upload.name.trim())return notify('Give your sticker a name before adding it.');
     if(home.custom.length>=50)return notify('Your sticker book is full. Remove a custom sticker to add another.');
-    const sticker={id:makeId(),name:upload.name||'My little treasure',src:removeBg?upload.processed:upload.original};
-    commit(h=>({...h,custom:[...h.custom,sticker]}));setCustomTab(true);setModal(null);setPage('home');notify('A little piece of you, added to your sticker book.');
+    const sticker={id:makeId(),name:upload.name.trim().slice(0,40),src:removeBg?upload.processed:upload.original};
+    commit(h=>({...h,custom:[...h.custom,sticker]}));setCustomTab(true);setShelf('stickers');setModal(null);setUpload(null);setPage('home');notify('A little piece of you, added to your sticker book.');
+  };
+  const openRenameSticker=sticker=>{if(!editable)return;setEditingStickerId(sticker.id);setEditingStickerName(sticker.name);setPanelOpen(true);setMode('decorate');setPage('home');};
+  const saveStickerRename=()=>{
+    if(!editingStickerId||!editingStickerName.trim())return;
+    commit(h=>({...h,custom:h.custom.map(s=>s.id===editingStickerId?{...s,name:editingStickerName.trim().slice(0,40)}:s)}));
+    setEditingStickerId(null);setEditingStickerName('');notify('Sticker name updated.');
   };
   const moveLayer=direction=>{
     if(!selectedItem)return;
@@ -484,13 +557,25 @@ function App() {
     notify('A fresh plan, ready to draw. Undo restores your previous layout until you refresh.');
   };
   const openProfile=()=>{setFormName(profile?.name||'Little dreamer');setProfileColor(profile?.color||'#a2ad83');setModal('profile');};
-  const nearItem=mode==='explore'&&home.items.find(i=>['sofa','chair','bed','art','cat','kettle'].includes(i.type)&&Math.hypot(i.x-position.x,i.y-position.y)<110);
-  const visibleHome=preview?.home||home;
-  const sceneItems=visibleHome.items.map(i=>preview?.id===i.id?{...i,...preview}:i);
+  const nearItem=mode==='explore'&&activeHome.items.find(i=>['sofa','chair','bed','art','cat','kettle'].includes(i.type)&&Math.hypot(i.x-position.x,i.y-position.y)<110);
+  const nearTravel=mode==='explore'&&stairTravel(home,activeLevel,position);
+  const sceneItems=activeHome.items.map(i=>preview?.id===i.id?{...i,...preview}:i);
+  const selectedStair=(visibleHome.stairs||[]).find(s=>selection.stairs?.length===1&&selection.stairs[0]===s.id);
   const groupCount=selectionCount(selection);
   const groupBounds=selectionBounds(visibleHome,selection,mode);
   const openingSelectionOnly=selection.openings.length>0&&!selection.items.length&&!selection.walls.length&&!selection.boundary&&!selection.sections.length;
+  const singleFurnitureSelection=mode==='decorate'&&selectedItem&&groupCount===1&&selection.items.includes(selectedItem.id);
   const furnitureBounds=selectedItem?selectionBounds(visibleHome,{...emptySelection(),items:[selectedItem.id]},'decorate'):null;
+  const selectedWallData=selectedWall&&!selectedWall.startsWith('section:')?visibleHome.walls.find(w=>w.id===selectedWall):null;
+  const changeFloor=level=>{
+    setActiveLevel(level);setDraftFloor(null);setFloorOverview(false);setSelection(emptySelection());setSelected(null);setSelectedWall(null);setPreview(null);setStroke([]);setTool('select');setSitting(false);
+    dragging.current=null;drawing.current=null;polygonDraft.current=[];
+    const data=floorHome(home,floorLayers.floors.find(f=>f.level===level));setPosition(homeSpawn(data));
+  };
+  const drawNewFloor=()=>{
+    const floors=floorLayers.floors,level=home.nextLevel||Math.max(0,...floors.map(f=>f.level))+1;
+    setDraftFloor({x:Math.max(0,...floors.map(f=>f.x+f.width))+400,y:floors[0]?.y||200});setActiveLevel(level);setMode('build');setFloorOverview(false);setPanelOpen(false);setSelection(emptySelection());setSelected(null);setSelectedWall(null);setTool('rectangle');setCamera({x:0,y:0});
+  };
   const chooseTool=id=>{floorClickRef.current=null;setTool(id);polygonDraft.current=[];drawing.current=null;setStroke([]);if(id!=='select'){setSelection(emptySelection());setSelected(null);setSelectedWall(null);}};
   const toolAction=action=>{
     if(!editable)return;
@@ -502,7 +587,7 @@ function App() {
     }
     commit(h=>transformFurniture(h,ids,action));
   };
-  return <div className={`app ${panelOpen?'drawer-open':''}`}>
+  return <div className={`app ${panelOpen?'drawer-open':''} ${modal==='upload'||editingStickerId?'is-uploading':''}`}>
     <div className="game-hud">
       <div className="hud-left">
         <button className="game-menu-trigger" onClick={()=>setMenuOpen(v=>!v)} aria-expanded={menuOpen} aria-label="Game menu"><SketchFrame/><Menu size={24}/><span>Menu</span></button>
@@ -518,12 +603,12 @@ function App() {
 
     {page==='home'&&<main className={`editor-layout ${panelOpen?'panel-is-open':''}`}>
       <section className={`workspace ${mode==='build'?'building':''} tool-${tool} ${panning?'camera-panning':''}`} ref={workspaceRef} aria-label="Your home editor">
-        {mode!=='explore'&&<Toolbox mode={mode} tool={tool} onChoose={chooseTool} canEdit={editable} hasSelection={groupCount>0||!!selectedItem} locked={selectedItem?.locked} onAction={toolAction} outlineEditMode={outlineEditMode} onOutlineEditMode={setOutlineEditMode}/>}
+        {!floorOverview&&mode!=='explore'&&<Toolbox mode={mode} tool={tool} onChoose={chooseTool} canEdit={editable} hasSelection={groupCount>0||!!selectedItem} locked={selectedItem?.locked} onAction={toolAction} outlineEditMode={outlineEditMode} onOutlineEditMode={setOutlineEditMode}/>}
 
         {mode==='build'&&tool!=='select'&&<div className="drawing-hint"><Pencil size={14}/>{({rectangle:'Click and drag to draw your home outline',polygon:'Click each corner. Click the first point to close your outline.',wall:'Click and drag to divide a room',freeform:'Draw freely. We’ll smooth the little wobbles.',boundary:'Draw a closed outline to reshape your home',door:'Click near a wall to add a door',window:'Click near a wall to add a window',eraser:'Click a wall or opening to remove it'})[tool]}</div>}
-        <svg ref={svgRef} className="room-scene" viewBox="0 0 1080 760" role="img" aria-label={mode==='build'?'Top-down floor plan editor':'Your top-down home'} onContextMenu={e=>{e.preventDefault();if(!cameraDrag.current&&performance.now()>suppressContextUntil.current)onFloorContext(e);}} onPointerDownCapture={onCameraDown} onPointerDown={onSceneDown} onPointerMove={onSceneMove} onPointerUp={onSceneUp} onPointerCancel={()=>{cameraDrag.current=null;setPanning(false);dragging.current=null;drawing.current=null;floorClickRef.current=null;marqueeRef.current=null;setMarquee(null);setPreview(null);setStroke([]);}} onDragOver={e=>{e.preventDefault();e.dataTransfer.dropEffect='copy';}} onDrop={e=>{e.preventDefault();const type=e.dataTransfer.getData('application/home-made');if(type)addItem(type,pointFromEvent(e));}}>
-          <g ref={groupRef} transform={`translate(${camera.x+540*(1-zoom)} ${camera.y+385*(1-zoom)}) scale(${zoom})`}>
-            {mode==='build'?<FloorPlan home={home} preview={preview} selectedWall={selectedWall} selection={selection} outlineEditMode={outlineEditMode} onWallDown={startWallDrag} onBoundaryDown={startBoundaryDrag} showGrid={home.grid} onOpeningDown={(e,o)=>{if(tool!=='select')return;e.stopPropagation();if(e.shiftKey){toggleSelected('openings',o.id);return;}setSelectedWall(null);setSelected(null);setSelection({...emptySelection(),openings:[o.id]});}}/>:<TopDownRoom home={visibleHome} onDoor={o=>{if(mode!=='explore')return;if(!buildable)return notify('The homeowner controls this door.');const ids=new Set(o.doorIds||[o.id]);commit(h=>({...h,openings:h.openings.map(d=>ids.has(d.id)?{...d,open:!d.open}:d)}));}}/>}
+        {!floorOverview&&<svg ref={svgRef} className="room-scene" viewBox="0 0 1080 760" role="img" aria-label={mode==='build'?'Top-down floor plan editor':'Your top-down home'} onContextMenu={e=>{e.preventDefault();if(!cameraDrag.current&&performance.now()>suppressContextUntil.current)onFloorContext(e);}} onPointerDownCapture={onCameraDown} onPointerDown={onSceneDown} onPointerMove={onSceneMove} onPointerUp={onSceneUp} onPointerCancel={()=>{cameraDrag.current=null;setPanning(false);dragging.current=null;drawing.current=null;floorClickRef.current=null;marqueeRef.current=null;setMarquee(null);setPreview(null);setStroke([]);}} onDragOver={e=>{e.preventDefault();e.dataTransfer.dropEffect='copy';}} onDrop={e=>{e.preventDefault();const type=e.dataTransfer.getData('application/home-made');if(type)addItem(type,pointFromEvent(e));}}>
+          <g ref={groupRef} transform={`translate(${camera.x+540*(1-zoom)} ${camera.y+385*(1-zoom)}) scale(${zoom}) translate(${floorShift.x} ${floorShift.y})`}>
+            {mode==='build'?<FloorPlan home={activeHome} onStairDown={onStairDown} selectedWall={selectedWall} selection={selection} outlineEditMode={outlineEditMode} onWallDown={startWallDrag} onBoundaryDown={startBoundaryDrag} showGrid={home.grid} onOpeningDown={(e,o)=>{if(tool!=='select')return;e.stopPropagation();if(e.shiftKey){toggleSelected('openings',o.id);return;}setSelectedWall(null);setSelected(null);setSelection({...emptySelection(),openings:[o.id]});}}/>:<FloorStack home={visibleHome} level={activeLevel} onStairDown={onStairDown} onDoor={o=>{if(mode!=='explore')return;if(!buildable)return notify('The homeowner controls this door.');const ids=new Set(o.doorIds||[o.id]);commit(h=>({...h,openings:h.openings.map(d=>ids.has(d.id)?{...d,open:!d.open}:d)}));}}/>}
             {(mode==='build'?[]:sceneItems).map(item=><g key={item.id} transform={`translate(${item.x} ${item.y}) rotate(${item.rotation}) scale(${item.scale})`} className={`furniture ${mode==='decorate'?'can-drag':''} ${selection.items.includes(item.id)?'is-selected':''}`} onPointerDown={e=>onItemDown(e,item)} style={{opacity:item.opacity??1}}>
               <g transform={`scale(${item.flipped?-1:1} 1)`}><TopDownFurniture type={item.type} custom={home.custom.find(c=>c.id===item.type)}/></g>
               {mode==='decorate'&&selected===item.id&&groupCount<=1&&<FurnitureSelection item={item} onResize={(e,i)=>{if(i.locked)return;e.stopPropagation();const p=pointFromEvent(e);dragging.current={id:i.id,resize:true,scale:i.scale,center:{x:i.x,y:i.y},distance:Math.hypot(p.x-i.x,p.y-i.y)};svgRef.current.setPointerCapture(e.pointerId);}}/>}
@@ -531,15 +616,21 @@ function App() {
             {mode==='explore'&&home.boundary.length>2&&<TopDownCharacter {...position} color={profile?.color} name={profile?.name} sitting={sitting}/>}
             {mode!=='build'&&players.filter(p=>p.id!==profile?.id).map(p=><TopDownCharacter key={p.connectionId} {...p.position} color={p.color} name={p.name}/>)}
             {!!stroke.length&&<g pointerEvents="none">{['rectangle','ellipse'].includes(tool)&&stroke.length>1?<><path d={tool==='ellipse'?ellipsePath(stroke[0],stroke.at(-1)):'M'+rectangleFromPoints(stroke[0],stroke.at(-1)).map(p=>p.x+','+p.y).join(' L')+' Z'} fill="#f9fbef88" stroke="#7c9965" strokeWidth="3" strokeDasharray="7 4"/><Dimension a={rectangleFromPoints(stroke[0],stroke.at(-1))[0]} b={rectangleFromPoints(stroke[0],stroke.at(-1))[1]} live/><Dimension a={rectangleFromPoints(stroke[0],stroke.at(-1))[1]} b={rectangleFromPoints(stroke[0],stroke.at(-1))[2]} live/></>:<><path d={['wall','polygon'].includes(tool)?'M'+stroke.map(p=>p.x+','+p.y).join(' L'):smoothPath(stroke,tool==='boundary')} fill={['polygon','boundary'].includes(tool)?'#c1cda329':'none'} stroke="#7c9965" strokeWidth="3" strokeDasharray="7 4" strokeLinecap="round"/>{tool==='wall'&&stroke.length>1&&<Dimension a={stroke[0]} b={stroke.at(-1)} live/>}{tool==='polygon'&&stroke.map((p,i)=><circle key={i} cx={p.x} cy={p.y} r={i===0?6:3} fill="#f9fbef" stroke="#7c9965" strokeWidth="1.5"/>)}</>}</g>}
-            {tool==='select'&&groupBounds&&groupCount>0&&<g className="group-selection"><rect {...groupBounds} rx="3" fill="#9cb77b0a" stroke="#90aa72" strokeWidth="1.4" strokeDasharray="6 4" pointerEvents={openingSelectionOnly?'none':'stroke'} onPointerDown={openingSelectionOnly?undefined:e=>startGroupDrag(e)}/><g pointerEvents="none">{[[groupBounds.x,groupBounds.y],[groupBounds.x+groupBounds.width,groupBounds.y],[groupBounds.x,groupBounds.y+groupBounds.height],[groupBounds.x+groupBounds.width,groupBounds.y+groupBounds.height]].map(([x,y],i)=><rect key={i} x={x-3} y={y-3} width="6" height="6" rx="1" fill="#f8f9ec" stroke="#90aa72" strokeWidth="1"/>)}</g></g>}
+            {tool==='select'&&groupBounds&&groupCount>0&&!singleFurnitureSelection&&<g className="group-selection"><rect {...groupBounds} rx="3" fill="#9cb77b0a" stroke="#90aa72" strokeWidth="1.4" strokeDasharray="6 4" pointerEvents={openingSelectionOnly?'none':'stroke'} onPointerDown={openingSelectionOnly?undefined:e=>startGroupDrag(e)}/><g pointerEvents="none">{[[groupBounds.x,groupBounds.y],[groupBounds.x+groupBounds.width,groupBounds.y],[groupBounds.x,groupBounds.y+groupBounds.height],[groupBounds.x+groupBounds.width,groupBounds.y+groupBounds.height]].map(([x,y],i)=><rect key={i} x={x-3} y={y-3} width="6" height="6" rx="1" fill="#f8f9ec" stroke="#90aa72" strokeWidth="1"/>)}</g></g>}
             {marquee&&<rect {...boxFromPoints(marquee.start,marquee.end)} className="selection-marquee" fill="#9ab47a25" stroke="#8ba96e" strokeWidth="1" pointerEvents="none"/>}
           </g>
-        </svg>
+        </svg>}
+        {floorOverview&&<FloorOverview home={home} activeLevel={activeLevel} onChoose={changeFloor} onClose={()=>setFloorOverview(false)}/>}
+        {!floorOverview&&floorLayers.floors.length>0&&<FloorSwitcher floors={floorLayers.floors} level={activeLevel} onLevel={changeFloor} onNew={buildable?drawNewFloor:undefined} overview={floorOverview} onOverview={()=>{setFloorOverview(true);setPanelOpen(false);}} bounds={floorLayers.active} groupRef={groupRef} workspaceRef={workspaceRef} viewKey={`${camera.x},${camera.y},${zoom},${activeLevel}`}/>}
+        {!floorOverview&&selectedStair&&buildable&&!preview&&<StairInspector stair={selectedStair} onChange={values=>commit(h=>({...h,stairs:(h.stairs||[]).map(s=>s.id===selectedStair.id?{...s,...values}:s)}))} onDelete={removeSelected}/>}
+        {draftFloor&&<div className="new-floor-prompt">Draw Level {activeLevel}<button onClick={()=>changeFloor(floorLayers.floors[0]?.level||1)}>Cancel</button></div>}
         {mode==='decorate'&&selectedItem&&furnitureBounds&&groupCount<=1&&!preview&&!panning&&<FurnitureToolbar item={selectedItem} bounds={furnitureBounds} groupRef={groupRef} workspaceRef={workspaceRef} viewKey={`${camera.x},${camera.y},${zoom}`} canEdit={editable} onAction={toolAction} onLock={()=>modifyItem(selectedItem.id,{locked:!selectedItem.locked})}/>}
         {mode==='explore'&&nearItem&&<button className="interaction-prompt" onClick={interact}><kbd>E</kbd>{sitting?'Get comfortable':nearItem.type==='bed'?'Rest a little':nearItem.type==='cat'?'Say hello':nearItem.type==='art'?'Take a closer look':nearItem.type==='kettle'?'A cup of tea':'Take a seat'}</button>}
+        {mode==='explore'&&nearTravel&&<button className="interaction-prompt stair-travel-prompt" onClick={interact}><kbd>E</kbd>Go to Level {nearTravel.level}</button>}
         {!home.boundary.length&&!stroke.length&&<div className="empty-game-prompt"><div className="empty-plan-mark"><Square size={42} strokeWidth={1}/><Pencil size={24} strokeWidth={1.4}/></div><h1>Your home starts here.</h1><p>Draw your first room. Make the rest your own.</p><span>Drag to draw a rectangle, or choose a custom outline</span></div>}
-        <div className="game-canvas-controls"><SketchFrame/><RulerMarks/><IconButton title="Undo (Ctrl+Z)" icon={Undo2} disabled={!history.past.length||!editable} onClick={undo}/><IconButton title="Redo (Ctrl+Shift+Z)" icon={Redo2} disabled={!history.future.length||!editable} onClick={redo}/><span className="control-divider"/><IconButton title="Show placement grid" icon={Grid2X2} active={home.grid} disabled={!buildable} onClick={()=>commit(h=>({...h,grid:!h.grid}))}/><span className="control-divider"/><IconButton title="Zoom out" icon={Minus} disabled={zoom<=.6} onClick={()=>setZoom(z=>Math.max(.6,Math.round((z-.1)*10)/10))}/><button className="zoom-value" title="Reset view" onClick={()=>{setZoom(1);setCamera({x:0,y:0});}}>{Math.round(zoom*100)}%</button><IconButton title="Zoom in" icon={Plus} disabled={zoom>=1.7} onClick={()=>setZoom(z=>Math.min(1.7,Math.round((z+.1)*10)/10))}/><span className="control-divider"/><IconButton title="Full screen" icon={Expand} onClick={()=>{if(document.fullscreenElement)document.exitFullscreen();else document.documentElement.requestFullscreen?.().catch(()=>notify('Full screen is unavailable in this browser.'));}}/></div>
-        {mode==='build'&&<div className="plan-scale"><span/><small>1 m</small><span>TOP VIEW / FLOOR 1</span></div>}
+<div className="game-canvas-controls"><SketchFrame/><RulerMarks/><IconButton title="Undo (Ctrl+Z)" icon={Undo2} disabled={!history.past.length||!editable} onClick={undo}/><IconButton title="Redo (Ctrl+Shift+Z)" icon={Redo2} disabled={!history.future.length||!editable} onClick={redo}/><span className="control-divider"/><IconButton title="Show placement grid" icon={Grid2X2} active={home.grid} disabled={!buildable} onClick={()=>commit(h=>({...h,grid:!h.grid}))}/><span className="control-divider"/><IconButton title="Zoom out" icon={Minus} disabled={zoom<=.2} onClick={()=>adjustZoom(-1)}/><button className="zoom-value" title="Reset view" onClick={()=>{setZoom(1);setCamera({x:0,y:0});}}>{Math.round(zoom*100)}%</button><IconButton title="Zoom in" icon={Plus} disabled={zoom>=3} onClick={()=>adjustZoom(1)}/><span className="control-divider"/><IconButton title="Full screen" icon={Expand} onClick={()=>{if(document.fullscreenElement)document.exitFullscreen();else document.documentElement.requestFullscreen?.().catch(()=>notify('Full screen is unavailable in this browser.'));}}/></div>
+        {mode==='build'&&<div className="plan-scale"><span/><small>1 m</small><span>TOP VIEW / LEVEL {activeLevel}</span></div>}
+        {mode==='build'&&selectedWallData&&tool==='select'&&<div className="wall-inspector" role="region" aria-label="Wall settings"><strong>Wall settings</strong><label>Width <input type="range" min="3" max="20" step="1" value={selectedWallData.thickness||7} onChange={e=>commit(h=>({...h,walls:h.walls.map(w=>w.id===selectedWallData.id?{...w,thickness:Number(e.target.value)}:w)}))}/><span>{selectedWallData.thickness||7}</span></label><button onClick={()=>commit(h=>({...h,walls:h.walls.map(w=>w.id===selectedWallData.id?{...w,thickness:7}:w)}))}>Reset default</button></div>}
         {mode==='build'&&(selectedWall||groupCount>0)&&tool==='select'&&<div className="wall-edit-panel"><Move size={15}/><span>{groupCount>1?groupCount+' selected - drag to move':selectedWall==='boundary'||selectedWall?.startsWith('section:')?outlineEditMode==='points'?'Drag a point to reshape':outlineEditMode==='proportional'?'Drag a handle to scale evenly':'Drag to resize; Shift keeps proportions':'Drag to move; Shift-click to add'}</span><span className="delete-key-hint"><kbd>Backspace</kbd> delete</span></div>}
       </section>
 
@@ -555,7 +646,10 @@ function App() {
             <label className="search-field"><Search size={16}/><input aria-label="Find something lovely" placeholder="Find something lovely…" value={query} onChange={e=>setQuery(e.target.value)}/>{query&&<button aria-label="Clear search" onClick={()=>setQuery('')}><X size={14}/></button>}</label>
             {shelf==='collection'&&<div className="category-chips">{CATEGORIES.map(({name,icon:Icon})=><button key={name} className={category===name?'active':''} onClick={()=>setCategory(name)}><Icon size={13} strokeWidth={1.7}/>{name}</button>)}</div>}
             <div className="catalog-section-label"><span>{shelf==='stickers'?'YOUR UPLOADS':category==='All pieces'?'ALL FURNITURE':category.toUpperCase()}</span><span>{libraryItems.length} pieces</span></div>
-            <div className="furniture-catalog">{libraryItems.map(item=><button className={`furniture-card ${selectedItem?.type===item.type?'selected':''}`} key={item.type} draggable={editable} onDragStart={e=>{e.dataTransfer.setData('application/home-made',item.type);e.dataTransfer.effectAllowed='copy';}} onClick={()=>addItem(item.type)} title={`${item.name} — click to place, or drag into your room`}><span className="furniture-card-art"><TopDownPreview type={item.type} custom={item.src?item:null}/><span className="add-piece"><Plus size={13}/></span></span><span className="furniture-name">{item.name}</span><span className="furniture-subtitle">{item.tag}</span></button>)}{!libraryItems.length&&<div className="catalog-empty"><Leaf/><h3>{shelf==='stickers'?'A little room for you':'Nothing here just yet'}</h3><p>{shelf==='stickers'?'Turn your favorite pictures into one-of-a-kind stickers.':'Try another search or category.'}</p>{shelf==='stickers'&&<button className="text-button" onClick={()=>fileRef.current.click()}>Add your first sticker<Plus size={14}/></button>}</div>}</div>
+            <div className="furniture-catalog">
+              {libraryItems.map(item=><FurnitureCard key={item.type} item={item} selected={selectedItem?.type===item.type} editable={editable} onPlace={()=>addItem(item.type)} onRename={()=>openRenameSticker(item)}/>)}
+              {!libraryItems.length&&<div className="catalog-empty"><Leaf/><h3>{shelf==='stickers'?'A little room for you':'Nothing here just yet'}</h3><p>{shelf==='stickers'?'Turn your favorite pictures into one-of-a-kind stickers.':'Try another search or category.'}</p>{shelf==='stickers'&&<button className="text-button" onClick={()=>fileRef.current.click()}>Add your first sticker<Plus size={14}/></button>}</div>}
+            </div>
             <button className="upload-card" onClick={()=>editable?fileRef.current.click():notify('Ask the homeowner for decorating permission first.')}><span className="upload-icon"><ImagePlus size={24} strokeWidth={1.5}/></span><span><strong>From your photos</strong><small>Upload a photo. Make it a sticker.</small></span><Plus size={17}/></button>
             <div className="shelf-footnote"><LeafIcon size={13}/>Collected for your home.</div>
           </>}
@@ -578,7 +672,8 @@ function App() {
     {modal==='rename'&&<Modal title="What feels like home?" eyebrow="GIVE YOUR LITTLE PLACE A NAME" onClose={closeModal}><p>A name for your own little corner of the world.</p><form onSubmit={e=>{e.preventDefault();if(formName.trim()){commit(h=>({...h,name:formName.trim().slice(0,80)}));setModal(null);}}}><label className="form-label">Your home’s name<input autoFocus maxLength={80} value={formName} onChange={e=>setFormName(e.target.value)} placeholder="My home"/></label><button className="button primary full-width" disabled={!formName.trim()}><Check size={17}/>That feels like home</button></form></Modal>}
     {modal==='profile'&&<Modal title="Hello, little dreamer." eyebrow="A LITTLE INTRODUCTION" onClose={closeModal}><p>What should your neighbors call you?</p><div className="profile-preview"><svg viewBox="0 0 130 120"><Character x={65} y={109} color={profileColor}/></svg></div><form onSubmit={async e=>{e.preventDefault();setBusy(true);try{await world.updateProfile({name:formName.trim(),color:profileColor});setModal(null);notify('Looking lovely. Make yourself at home.');}catch(err){notify(err.message);}finally{setBusy(false);}}}><label className="form-label">Your display name<input autoFocus required maxLength={24} value={formName} onChange={e=>setFormName(e.target.value)}/></label><label className="form-label">A favorite color</label><div className="profile-colors">{['#a2ad83','#bda080','#a0b6b1','#c29d9b','#b1a2bb','#cfb676'].map(c=><button type="button" key={c} title={`Outfit color ${c}`} aria-label={`Outfit color ${c}`} className={profileColor===c?'active':''} style={{background:c}} onClick={()=>setProfileColor(c)}>{profileColor===c&&<Check size={19}/>}</button>)}</div><button className="button primary full-width" disabled={busy||!formName.trim()}>{busy?<LoaderCircle size={17} className="spin"/>:<Check size={17}/>}That’s a little more me</button></form></Modal>}
     {modal==='invite'&&<Modal title="A little company?" eyebrow="GOOD HOMES HAVE ROOM FOR FRIENDS" onClose={closeModal}><p>Invite someone to slow down, stay a while, and make a little memory.</p>{role==='owner'?<><label className="form-label">Give your friend a little freedom<select value={inviteRole} onChange={e=>{setInviteRole(e.target.value);setInviteLink('');}}><option value="viewer">Visitor — wander & enjoy</option><option value="decorator">Decorator — make it cozy together</option><option value="builder">Builder — dream & build together</option></select></label><button className="button primary full-width" onClick={createInvite} disabled={busy}>{busy?<LoaderCircle size={17} className="spin"/>:<Link size={17}/>}Make an invitation<Copy size={16}/></button>{inviteLink&&<label className="form-label invite-link-label">A link to your little place · valid for 7 days<input readOnly aria-label="Invitation link" value={inviteLink} onFocus={e=>e.target.select()}/></label>}<div className="public-setting"><span><DoorOpen size={21}/><span><strong>Leave the door open</strong><small>Let neighbors visit and look around.</small></span></span><button className={`toggle ${access.public?'on':''}`} role="switch" aria-checked={access.public} aria-label="Allow neighborhood visitors" onClick={()=>updateAccess({public:!access.public})}><span/></button></div>{access.collaborators.length>0&&<div className="collaborators"><h3>People with a little key</h3>{access.collaborators.map(p=><div className="collaborator" key={p.id}><span className="mini-avatar" style={{background:p.color}}>•ᴗ•</span><span>{p.name}</span><select aria-label={`Permission for ${p.name}`} value={p.role} onChange={e=>updateAccess({playerId:p.id,role:e.target.value})}><option value="viewer">Visitor</option><option value="decorator">Decorator</option><option value="builder">Builder</option><option value="remove">Remove access</option></select></div>)}</div>}</>:<div className="visitor-notice"><ShieldCheck size={28}/><h3>You’re a welcome {role==='viewer'?'visitor':role}.</h3><p>Only the homeowner can make invitations and change who has a key.</p></div>}<span className="modal-footnote"><LockKeyhole size={12}/>Your home. Your people. Your choice.</span></Modal>}
-    {modal==='upload'&&<Modal title="A little piece of you." eyebrow="FROM FAVORITE PHOTO TO LITTLE TREASURE" onClose={closeModal}>{busy?<div className="upload-loading"><LoaderCircle className="spin"/><p>Finding the lovely in your photo…</p></div>:upload&&<><div className="sticker-preview"><img src={removeBg?upload.processed:upload.original} alt="Your custom sticker preview"/></div><label className="form-label">A name for your little treasure<input maxLength={40} value={upload.name} onChange={e=>setUpload(u=>({...u,name:e.target.value}))}/></label><div className="public-setting"><span><Sparkles size={19}/><span><strong>Remove the background</strong><small>Works best with a plain, solid background.</small></span></span><button className={`toggle ${removeBg?'on':''}`} role="switch" aria-checked={removeBg} aria-label="Remove image background" onClick={()=>setRemoveBg(r=>!r)}><span/></button></div><button className="button primary full-width" onClick={saveUpload}><Plus size={17}/>Keep it in my sticker book</button></>}</Modal>}
+    {modal==='upload'&&<StickerDialog busy={busy} src={removeBg?upload?.processed:upload?.original} name={upload?.name||''} removeBg={removeBg} onRemoveBg={setRemoveBg} onName={name=>setUpload(u=>({...u,name}))} cancel={closeModal} save={saveUpload}/>}
+    {editingStickerId&&home.custom.some(s=>s.id===editingStickerId)&&<StickerDialog renaming src={home.custom.find(s=>s.id===editingStickerId).src} name={editingStickerName} onName={setEditingStickerName} cancel={()=>setEditingStickerId(null)} save={saveStickerRename}/>}
     {modal==='help'&&<Modal title="A little guide to feeling at home." eyebrow="THERE’S NO WRONG WAY TO MAKE IT YOURS" wide onClose={closeModal}><div className="help-grid"><div><Hammer/><h3>Dream it. Draw it.</h3><p>Build straight walls or draw freeform curves. Use Home outline for a new floor shape. Select a wall to move it or drag its endpoints.</p></div><div><Armchair/><h3>A few favorite things.</h3><p>Click or drag a piece from the collection. Select it to resize, rotate, flip, layer, or lock it. Your changes save as you go.</p></div><div><DoorOpen/><h3>Settle right in.</h3><p>Switch to Explore. Wander with WASD or arrow keys. Walk up to a chair, your bed, or a little treasure, then press E.</p></div><div><Users/><h3>Better together.</h3><p>Invite a friend with a visitor, decorator, or builder pass. Open the same link on another device to walk and decorate together.</p></div></div><div className="help-note"><ShieldCheck size={19}/><p>Your home is linked to this browser. Keep your browser data to return to it. Use a backup to keep a personal copy.</p></div><button className="button secondary full-width" onClick={exportHome}><Download size={17}/>Keep a backup of my home</button></Modal>}
     {modal==='room'&&<Modal title="Your own cozy corner." eyebrow="A LITTLE PLACE TO JUST BE" onClose={closeModal}><p>{home.description}</p><div className="room-stats"><span><strong>{home.items.length}</strong>favorite things</span><span><strong>{home.walls.length}</strong>little walls</span><span><strong>{players.length}</strong>at home</span></div><p className="room-quote">“A home isn’t simply given to you.<br/>You make it yours.”</p><button className="button secondary full-width" onClick={()=>{setModal(null);openNeighborhood();}}><DoorOpen size={17}/>Meet the neighborhood<ArrowRight size={16}/></button></Modal>}
   </div>;

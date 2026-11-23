@@ -130,14 +130,18 @@ export function combineNearbyWindows(openings, gap = 18){
   return result;
 }
 
-export function combineDoorPairs(openings, gap = 18){
+export function combineDoorPairs(openings, gap = 48){
   const result=[];
   for(const opening of openings){
     if(opening.type!=='door'){result.push(opening);continue;}
+    // Mesh openings may already be paired. Never collapse their span/IDs on
+    // a second pass (the decorated renderer used to do exactly that).
+    if(opening.doorIds?.length===2){result.push({...opening,doorIds:[...opening.doorIds]});continue;}
     const match=result.find(candidate=>candidate.type==='door'&&
       (candidate.doorIds||[candidate.id]).length<2&&
       (opening.wallIndex===undefined||candidate.wallIndex===undefined||opening.wallIndex===candidate.wallIndex)&&
       Math.abs(Math.sin(((candidate.angle||0)-(opening.angle||0))*Math.PI/180))<.12&&
+      Math.abs((candidate.x-opening.x)*Math.sin((opening.angle||0)*Math.PI/180)-(candidate.y-opening.y)*Math.cos((opening.angle||0)*Math.PI/180))<14&&
       Math.hypot(candidate.x-opening.x,candidate.y-opening.y)<84+gap);
     if(!match){result.push({...opening,doorSpan:42,doorIds:[opening.id]});continue;}
     const angle=(opening.angle||0)*Math.PI/180,cx=(match.x+opening.x)/2,cy=(match.y+opening.y)/2;
@@ -148,15 +152,15 @@ export function combineDoorPairs(openings, gap = 18){
 
 // Larger floor-plan Y is closer to the camera. Compare depths at each projected
 // point so diagonal walls also hide just the part of a door/window behind them.
-export function openingOccluders(mesh,opening,{leaf=false}={}){
+export function openingOccluders(mesh,opening,{leaf=false,hingeAlong=-20,leafLength=40,swing=70}={}){
   const angle=(opening.angle||0)*Math.PI/180,side=Math.abs(Math.cos(angle))<.15;
-  const leafAngle=angle+(leaf&&opening.open?70*Math.PI/180:0);
-  const x=opening.x-(leaf?20*Math.cos(angle):0),y=opening.y-(leaf?20*Math.sin(angle):0);
+  const leafAngle=angle+(leaf&&opening.open?swing*Math.PI/180:0);
+  const x=opening.x+(leaf?hingeAlong*Math.cos(angle):0),y=opening.y+(leaf?hingeAlong*Math.sin(angle):0);
   let plane;
   if(opening.height<=18)plane=[0,1,0];
   else if(side&&opening.type==='window')plane=[0,1,opening.height];
   else if(side&&!(leaf&&opening.open))plane=leaf?[0,1,opening.height]:[0,0,opening.y+21];
-  else if(leaf&&Math.abs(Math.cos(leafAngle))<.0001)plane=[0,0,Math.max(y,y+40*Math.sin(leafAngle))];
+  else if(leaf&&Math.abs(Math.cos(leafAngle))<.0001)plane=[0,0,Math.max(y,y+leafLength*Math.sin(leafAngle))];
   else plane=[Math.tan(leafAngle),0,y-Math.tan(leafAngle)*x];
   const pieces=[];
   for(const surface of mesh.surfaces){
@@ -198,7 +202,7 @@ export function roomWallEdges(home){
     return {...p};
   };
   const interior=[];
-  for(const wall of home.walls)wall.points.slice(1).forEach((b,i)=>interior.push({a:alignedPoint(wall.points[i]),b:alignedPoint(b),planA:wall.points[i],planB:b,height:WALL_HEIGHT,exterior:false,thickness:7}));
+  for(const wall of home.walls)wall.points.slice(1).forEach((b,i)=>interior.push({a:alignedPoint(wall.points[i]),b:alignedPoint(b),planA:wall.points[i],planB:b,height:WALL_HEIGHT,exterior:false,thickness:Math.max(3,Number(wall.thickness)||7),wallId:wall.id}));
   // Short connector pieces inherit the actual straight line of their long
   // neighbor instead of making square-cap bumps at the join.
   for(const edge of interior){

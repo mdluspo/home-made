@@ -1,5 +1,7 @@
 import React,{useEffect,useRef,useState} from 'react';
 import { ArrowDown,ArrowUp,Check,ChevronRight,Copy,FlipHorizontal2,MousePointer2,RotateCcw,RotateCw } from 'lucide-react';
+import {StairGlyph} from './Stairs.jsx';
+import {STAIR_TYPES} from './stairs.js';
 
 function ToolRailFrame({rail,open,hover,mode}){
   const [shape,setShape]=useState({width:55,height:225,tabs:[]});
@@ -14,6 +16,7 @@ function ToolRailFrame({rail,open,hover,mode}){
 }
 
 export function ToolGlyph({kind}){
+  if(kind==='stairs'||kind?.startsWith('stairs-'))return <StairGlyph kind={kind==='stairs'?'straight':kind.slice(7)}/>;
   return <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     {kind==='wall'?<path d="M4 19 20 5" strokeWidth="2"/>:kind==='rectangle'?<><path d="M4.1 5.2Q12 4.8 20 5.1L19.8 19Q11.6 18.7 4 19.1Z"/>{[[4,5],[20,5],[4,19],[20,19]].map(([x,y],i)=><rect key={i} x={x-1.5} y={y-1.5} width="3" height="3" fill="var(--tool-paper, #f8f7eb)" strokeWidth="1.2"/>)}</>:kind==='polygon'?<><path d="M4 18V7l9-3 7 7-5 9z"/>{[[4,18],[4,7],[13,4],[20,11],[15,20]].map(([x,y],i)=><circle key={i} cx={x} cy={y} r="1.5" fill="var(--tool-paper, #f8f7eb)" strokeWidth="1.2"/>)}</>:kind==='ellipse'?<><ellipse cx="12" cy="12" rx="9" ry="7"/><path d="M12 2v4m0 12v4M1 12h4m14 0h4" strokeWidth="1"/></>:kind==='boundary'?<><path d="M4 17q-3-9 3-12c5-4 4 4 9 1s8 10 3 13-7-2-11 1q-4 1-4-3Z"/><path d="m16 3 4 3m-1-4 3 3" strokeWidth="1"/></>:kind==='freeform'?<><path d="M4 19C4 4 20 20 20 5" strokeWidth="3"/><circle cx="4" cy="19" r="2" fill="var(--tool-paper, #f8f7eb)"/><circle cx="20" cy="5" r="2" fill="var(--tool-paper, #f8f7eb)"/></>:kind==='door'?<><path d="M4 21Q4.3 12 4 3.2L19 3Q18.7 13 19 21M2 21q9-.3 19 0"/><path d="m7 6 8-1v17l-8-3Z" fill="#d7dfc6"/><path d="M12 12v2" strokeWidth="1.8"/></>:kind==='window'?<><path d="M2 12h5m10 0h5" strokeWidth="5"/><path d="M7 12h10" strokeWidth="1.2"/></>:null}
   </svg>;
@@ -22,6 +25,7 @@ const GROUPS=[
   {id:'outline',name:'Home outline',options:[{id:'rectangle',name:'Rectangle',hint:'Drag out a rectangular home'},{id:'polygon',name:'Polygon',hint:'Click corners; close at the first point'},{id:'ellipse',name:'Ellipse',hint:'Drag to draw a round home'},{id:'boundary',name:'Freehand outline',hint:'Draw any closed shape'}]},
   {id:'divider',name:'Room dividers',options:[{id:'wall',name:'Straight divider',hint:'Draw a wall that splits your space'},{id:'freeform',name:'Curved divider',hint:'Draw a smooth, freeform wall'}]},
   {id:'openings',name:'Doors & windows',options:[{id:'door',name:'Door',hint:'Place a door on a wall'},{id:'window',name:'Window',hint:'Place a window on a wall'}]},
+  {id:'vertical',name:'Stairs',options:STAIR_TYPES.map(t=>({id:t.id==='straight'?'stairs':`stairs-${t.id}`,name:t.name,hint:'Click inside the active floor to place stairs'}))},
 ];
 function ToolGroup({group,tool,choose,open,setOpen,hover}){
   const [last,setLast]=useState(group.options[0].id);

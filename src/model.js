@@ -1,24 +1,24 @@
 import polygonClipping from 'polygon-clipping';
 
 export const CATALOG = [
-  { type: 'sofa', name: 'Sunday sofa', category: 'Furniture', color: '#a9b68c', tag: 'A soft place to land', w: 180, h: 140 },
-  { type: 'chair', name: 'Reading chair', category: 'Furniture', color: '#d6a374', tag: 'Just one more chapter', w: 95, h: 110 },
-  { type: 'table', name: 'Little oak table', category: 'Furniture', color: '#c39b70', tag: 'Made for slow mornings', w: 140, h: 100 },
-  { type: 'shelf', name: 'Story keeper', category: 'Furniture', color: '#bc966f', tag: 'Room for your favorites', w: 125, h: 190 },
-  { type: 'bed', name: 'Cloud bed', category: 'Bedroom', color: '#d5b484', tag: 'Five more minutes', w: 180, h: 160 },
-  { type: 'cabinet', name: 'Oak sideboard', category: 'Furniture', color: '#b99168', tag: 'Hide away little things', w: 150, h: 110 },
-  { type: 'plant', name: 'Happy monstera', category: 'Plants', color: '#85955e', tag: 'A little growing company', w: 85, h: 135 },
-  { type: 'fern', name: 'Fern friend', category: 'Plants', color: '#8fa375', tag: 'Loves a sunny corner', w: 80, h: 100 },
-  { type: 'lamp', name: 'Warm glow lamp', category: 'Lighting', color: '#e5c38a', tag: 'Let there be cozy', w: 80, h: 165 },
-  { type: 'rug', name: 'Meadow rug', category: 'Decor', color: '#b6bd8e', tag: 'A little softer underfoot', w: 260, h: 140 },
-  { type: 'art', name: 'A sunny little day', category: 'Decor', color: '#c5a06d', tag: 'A window to somewhere', w: 90, h: 90 },
-  { type: 'books', name: 'Well-loved books', category: 'Decor', color: '#a3a6a0', tag: 'Stories to get lost in', w: 65, h: 55 },
-  { type: 'kettle', name: 'Tea for two', category: 'Kitchen', color: '#cbb285', tag: 'Put the kettle on', w: 85, h: 70 },
-  { type: 'stove', name: 'Little cookstove', category: 'Kitchen', color: '#9ca9a3', tag: 'Something good is cooking', w: 125, h: 125 },
-  { type: 'fridge', name: 'Retro fridge', category: 'Kitchen', color: '#9fac94', tag: 'Keep the good things fresh', w: 100, h: 175 },
-  { type: 'nightstand', name: 'Bedside buddy', category: 'Bedroom', color: '#b99570', tag: 'Your book goes here', w: 85, h: 85 },
-  { type: 'mirror', name: 'Morning mirror', category: 'Bedroom', color: '#b99570', tag: 'Hello, lovely', w: 80, h: 145 },
-  { type: 'cat', name: 'Sleepy companion', category: 'Decor', color: '#d5b281', tag: 'Already feels at home', w: 85, h: 65 },
+  { type: 'sofa', name: 'Sofa', category: 'Furniture', color: '#a9b68c', tag: 'A soft place to land', w: 180, h: 140 },
+  { type: 'chair', name: 'Chair', category: 'Furniture', color: '#d6a374', tag: 'Just one more chapter', w: 95, h: 110 },
+  { type: 'table', name: 'Table', category: 'Furniture', color: '#c39b70', tag: 'Made for slow mornings', w: 140, h: 100 },
+  { type: 'shelf', name: 'Shelf', category: 'Furniture', color: '#bc966f', tag: 'Room for your favorites', w: 125, h: 190 },
+  { type: 'bed', name: 'Bed', category: 'Bedroom', color: '#d5b484', tag: 'Five more minutes', w: 180, h: 160 },
+  { type: 'cabinet', name: 'Cabinet', category: 'Furniture', color: '#b99168', tag: 'Hide away little things', w: 150, h: 110 },
+  { type: 'plant', name: 'Plant', category: 'Plants', color: '#85955e', tag: 'A little growing company', w: 85, h: 135 },
+  { type: 'fern', name: 'Fern', category: 'Plants', color: '#8fa375', tag: 'Loves a sunny corner', w: 80, h: 100 },
+  { type: 'lamp', name: 'Lamp', category: 'Lighting', color: '#e5c38a', tag: 'Let there be cozy', w: 80, h: 165 },
+  { type: 'rug', name: 'Rug', category: 'Decor', color: '#b6bd8e', tag: 'A little softer underfoot', w: 260, h: 140 },
+  { type: 'art', name: 'Art', category: 'Decor', color: '#c5a06d', tag: 'A window to somewhere', w: 90, h: 90 },
+  { type: 'books', name: 'Books', category: 'Decor', color: '#a3a6a0', tag: 'Stories to get lost in', w: 65, h: 55 },
+  { type: 'kettle', name: 'Kettle', category: 'Kitchen', color: '#cbb285', tag: 'Put the kettle on', w: 85, h: 70 },
+  { type: 'stove', name: 'Stove', category: 'Kitchen', color: '#9ca9a3', tag: 'Something good is cooking', w: 125, h: 125 },
+  { type: 'fridge', name: 'Refrigerator', category: 'Kitchen', color: '#9fac94', tag: 'Keep the good things fresh', w: 100, h: 175 },
+  { type: 'nightstand', name: 'Nightstand', category: 'Bedroom', color: '#b99570', tag: 'Your book goes here', w: 85, h: 85 },
+  { type: 'mirror', name: 'Mirror', category: 'Bedroom', color: '#b99570', tag: 'Hello, lovely', w: 80, h: 145 },
+  { type: 'cat', name: 'Cat', category: 'Decor', color: '#d5b281', tag: 'Already feels at home', w: 85, h: 65 },
 ];
 const FOOTPRINTS={sofa:[110,48],chair:[45,46],table:[64,52],shelf:[90,26],bed:[82,108],cabinet:[82,32],plant:[38,38],fern:[34,34],lamp:[26,26],rug:[140,95],art:[42,28],books:[25,19],kettle:[28,28],stove:[48,48],fridge:[45,48],nightstand:[36,32],mirror:[38,18],cat:[32,24]};
 export const furnitureFootprint=type=>FOOTPRINTS[type]||[70,70];
@@ -32,7 +32,7 @@ export function initialHome() {
   return {
     name: 'My house', description: 'An empty space, ready to become your home.',
     geometryVersion: 2, floor: 'oak', wallColor: '#e7e5cf', grid: true,
-    boundary: [], sections: [], outlines: [], holes: [], walls: [], openings: [], custom: [],
+    boundary: [], sections: [], outlines: [], holes: [], walls: [], openings: [], stairs: [], custom: [],
     items: [],
   };
 }
@@ -50,6 +50,7 @@ export function migrateHome(home) {
     boundary: home.boundary.map(worldToPlan),
     walls: home.walls.map(w => ({ ...w, points: w.points.map(worldToPlan) })),
     openings: home.openings.map(o => ({ ...o, ...worldToPlan(o) })),
+    stairs: (home.stairs || []).map(s => ({ ...s, ...worldToPlan(s) })),
   };
 }
 export function planArea(points) {
@@ -120,7 +121,22 @@ function sectionLayout(home){
   }
   const outlines=geometry.map(poly=>poly[0].slice(0,-1).map(([x,y])=>({x,y}))).sort((a,b)=>planArea(b)-planArea(a));
   const holes=geometry.flatMap(poly=>poly.slice(1).map(r=>r.slice(0,-1).map(([x,y])=>({x,y}))));
-  return {sections,outlines,holes,boundary:outlines[0]||[],joins};
+  // Render order is area-sorted; floor identity is not. Persist each section's
+  // level and only allocate a number for a genuinely new detached component.
+  const validLevel=n=>Number.isSafeInteger(n)&&n>0;
+  let nextLevel=Math.max(validLevel(home.nextLevel)?home.nextLevel:1,...sections.map(s=>validLevel(s.level)?s.level+1:1));
+  const components=outlines.map((ring,index)=>({index,sections:sections.filter(section=>section.points.some(p=>pointInPolygon(p,ring)||ring.some((a,i)=>distanceToSegment(p,a,ring[(i+1)%ring.length])<.01)))}));
+  const used=new Set(),floorLevels=[],sectionLevels=new Map();
+  // Migrations and newly split components follow saved section order, never
+  // their size or their current left/right position on the canvas.
+  components.sort((a,b)=>Math.min(...a.sections.map(s=>sections.indexOf(s)))-Math.min(...b.sections.map(s=>sections.indexOf(s))));
+  for(const component of components){
+    const retained=component.sections.map(s=>s.level).filter(n=>validLevel(n)&&!used.has(n));
+    const level=retained.length?Math.min(...retained):nextLevel++;
+    used.add(level);floorLevels[component.index]=level;
+    for(const section of component.sections)sectionLevels.set(section.id,level);
+  }
+  return {sections:sections.map(s=>({...s,level:sectionLevels.get(s.id)})),outlines,holes,boundary:outlines[0]||[],joins,floorLevels,nextLevel};
 }
 const lerpPoint=(a,b,t)=>({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t});
 const closePoint=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y)<.05;
@@ -334,6 +350,7 @@ export function validateHome(home) {
   if(home.sections!==undefined&&(!Array.isArray(home.sections)||home.sections.length>50||!home.sections.every(s=>typeof s.id==='string'&&Array.isArray(s.points)&&s.points.length>=3&&s.points.length<=2000&&s.points.every(point))))return false;
   if(home.removedJoins!==undefined&&(!Array.isArray(home.removedJoins)||home.removedJoins.length>500||!home.removedJoins.every(k=>typeof k==='string'&&k.length<300)))return false;
   if (!Array.isArray(home.openings) || home.openings.length > 200 || !home.openings.every(o => point(o) && ['door', 'window'].includes(o.type))) return false;
+  if(home.stairs!==undefined&&(!Array.isArray(home.stairs)||home.stairs.length>100||!home.stairs.every(s=>typeof s.id==='string'&&point(s)&&(s.kind===undefined||['straight','single-winder','double-winder','spiral','half-landing','quarter-landing'].includes(s.kind))&&(s.rotation===undefined||finite(s.rotation))&&(s.scale===undefined||finite(s.scale)&&s.scale>=.5&&s.scale<=2))))return false;
   if (!home.walls.every(w => typeof w.id === 'string' && Array.isArray(w.points) && w.points.length >= 2 && w.points.length <= 2000 && w.points.every(point))) return false;
   if (!Array.isArray(home.custom) || home.custom.length > 50 || !home.custom.every(c => typeof c.id === 'string' && typeof c.name === 'string' && /^data:image\/(png|jpeg|webp);base64,/.test(c.src) && c.src.length < 3000000)) return false;
   return home.items.every(i => typeof i.id === 'string' && (CATALOG.some(c => c.type === i.type) || home.custom.some(c => c.id === i.type)) && point(i) && finite(i.rotation) && finite(i.scale) && i.scale >= 0.2 && i.scale <= 3);

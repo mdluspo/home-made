@@ -1,7 +1,8 @@
 import { distanceToSegment, floorOutlines, furnitureVisualBounds, getSections, normalizePlan, pointInPolygon, snapSection } from './model.js';
+import {stairBounds} from './stairs.js';
 
-export const emptySelection=()=>({boundary:false,sections:[],walls:[],items:[],openings:[]});
-export const selectionCount=s=>Number(s.boundary)+(s.sections?.length||0)+s.walls.length+s.items.length+s.openings.length;
+export const emptySelection=()=>({boundary:false,sections:[],walls:[],items:[],openings:[],stairs:[]});
+export const selectionCount=s=>Number(s.boundary)+(s.sections?.length||0)+s.walls.length+s.items.length+s.openings.length+(s.stairs?.length||0);
 export function transformFurniture(home,ids,action){
   const chosen=new Set(home.items.filter(i=>ids.includes(i.id)&&!i.locked).map(i=>i.id));
   if(!chosen.size)return home;
@@ -44,15 +45,20 @@ export function selectInBox(home,rect,mode='build'){
     s.openings=home.openings.filter(o=>contains(rect,o)).map(o=>o.id);
   }
   s.items=home.items.filter(i=>!i.locked&&contains(rect,i)).map(i=>i.id);
+  s.stairs=(home.stairs||[]).filter(i=>contains(rect,i)).map(i=>i.id);
   return s;
 }
-export function mergeSelection(a,b){return {boundary:a.boundary||b.boundary,sections:[...new Set([...(a.sections||[]),...(b.sections||[])])],walls:[...new Set([...a.walls,...b.walls])],items:[...new Set([...a.items,...b.items])],openings:[...new Set([...a.openings,...b.openings])]};}
+export function mergeSelection(a,b){return {boundary:a.boundary||b.boundary,sections:[...new Set([...(a.sections||[]),...(b.sections||[])])],walls:[...new Set([...a.walls,...b.walls])],items:[...new Set([...a.items,...b.items])],openings:[...new Set([...a.openings,...b.openings])],stairs:[...new Set([...(a.stairs||[]),...(b.stairs||[])])]};}
 export function selectionBounds(home,s,mode='build'){
   const points=[];
   if(s.boundary)points.push(...home.boundary);
   for(const section of getSections(home))if(s.sections?.includes(section.id))points.push(...section.points);
   for(const w of home.walls)if(s.walls.includes(w.id))points.push(...w.points);
   for(const o of home.openings)if(s.openings.includes(o.id))points.push(o);
+  for(const stair of home.stairs||[])if(s.stairs?.includes(stair.id)){
+    const b=stairBounds(stair,{decorated:mode!=='build'}),r=(stair.rotation||0)*Math.PI/180,scale=stair.scale||1;
+    for(const [x,y] of [[b.x,b.y],[b.x+b.width,b.y],[b.x+b.width,b.y+b.height],[b.x,b.y+b.height]])points.push({x:stair.x+(x*Math.cos(r)-y*Math.sin(r))*scale,y:stair.y+(x*Math.sin(r)+y*Math.cos(r))*scale});
+  }
   for(const i of home.items)if(s.items.includes(i.id)){
     const b=furnitureVisualBounds(i.type),angle=i.rotation*Math.PI/180;
     for(const [x,y] of [[b.x,b.y],[b.x+b.width,b.y],[b.x+b.width,b.y+b.height],[b.x,b.y+b.height]])points.push({x:i.x+(x*Math.cos(angle)-y*Math.sin(angle))*i.scale,y:i.y+(x*Math.sin(angle)+y*Math.cos(angle))*i.scale});
@@ -82,13 +88,13 @@ function detachJoins(home,ids){
   })};
 }
 export function moveSelection(home,s,delta){
-  if(s.boundary)return {...home,boundary:home.boundary.map(p=>shifted(p,delta)),sections:getSections(home).map(section=>({...section,points:section.points.map(p=>shifted(p,delta))})),outlines:floorOutlines(home).map(r=>r.map(p=>shifted(p,delta))),holes:(home.holes||[]).map(r=>r.map(p=>shifted(p,delta))),walls:home.walls.map(w=>({...w,points:w.points.map(p=>shifted(p,delta))})),items:home.items.map(i=>shifted(i,delta)),openings:home.openings.map(o=>shifted(o,delta))};
+if(s.boundary)return {...home,boundary:home.boundary.map(p=>shifted(p,delta)),sections:getSections(home).map(section=>({...section,points:section.points.map(p=>shifted(p,delta))})),outlines:floorOutlines(home).map(r=>r.map(p=>shifted(p,delta))),holes:(home.holes||[]).map(r=>r.map(p=>shifted(p,delta))),walls:home.walls.map(w=>({...w,points:w.points.map(p=>shifted(p,delta))})),stairs:(home.stairs||[]).map(i=>shifted(i,delta)),items:home.items.map(i=>shifted(i,delta)),openings:home.openings.map(o=>shifted(o,delta))};
   if(s.sections?.length)return transformFloorSections(home,s.sections,p=>shifted(p,delta),true);
   home=detachJoins(home,s.walls);
   const movedNodes=[];
   for(const w of home.walls)if(s.walls.includes(w.id))for(const p of w.points)movedNodes.push({from:p,to:constrainToOriginalBoundary(shifted(p,delta),p,home)});
   const moveNode=p=>movedNodes.find(n=>same(n.from,p))?.to||p;
-  return {...home,walls:home.walls.map(w=>({...w,points:w.points.map(moveNode)})),items:home.items.map(i=>s.items.includes(i.id)?shifted(i,delta):i),openings:home.openings.map(o=>{
+  return {...home,walls:home.walls.map(w=>({...w,points:w.points.map(moveNode)})),stairs:(home.stairs||[]).map(i=>s.stairs?.includes(i.id)?shifted(i,delta):i),items:home.items.map(i=>s.items.includes(i.id)?shifted(i,delta):i),openings:home.openings.map(o=>{
     if(s.openings.includes(o.id))return shifted(o,delta);
     const wall=home.walls.find(w=>s.walls.includes(w.id)&&w.points.some((p,i)=>i>0&&distanceToSegment(o,w.points[i-1],p)<1));
     return wall?shifted(o,delta):o;
@@ -119,7 +125,7 @@ function transformFloorSections(home,ids,transform,snap=false){
   // Carry belongings with the selected section; generated seams are rebuilt
   // from the new layout rather than dragged as loose wall objects.
   const movePoint=p=>{const section=chosen.find(s=>belongs(p,s));if(!section)return p;const before=transform(section.points[0]),after=transformed.find(s=>s.id===section.id).points[0],q=transform(p);return {...p,x:q.x+after.x-before.x,y:q.y+after.y-before.y};};
-  return normalizePlan({...home,sections:[...stationary,...moved],walls:home.walls.filter(w=>w.source!=='join').map(w=>({...w,points:w.points.map(movePoint)})),items:home.items.map(movePoint),openings:home.openings.map(movePoint)});
+  return normalizePlan({...home,sections:[...stationary,...moved],walls:home.walls.filter(w=>w.source!=='join').map(w=>({...w,points:w.points.map(movePoint)})),stairs:(home.stairs||[]).map(movePoint),items:home.items.map(movePoint),openings:home.openings.map(movePoint)});
 }
 export function outlineBounds(boundary){
   if(!boundary.length)return null;
@@ -176,11 +182,12 @@ export function resizeOutline(home,corner,target,{proportional=false,sectionId=n
   else{sx=Math.max(20/b.width,sx);sy=Math.max(20/b.height,sy);}
   const transform=p=>({...p,x:anchor.x+(p.x-anchor.x)*sx,y:anchor.y+(p.y-anchor.y)*sy});
   if(sectionId)return transformFloorSections(home,[sectionId],transform);
-  return {...home,boundary:home.boundary.map(transform),sections:getSections(home).map(s=>({...s,points:s.points.map(transform)})),outlines:floorOutlines(home).map(r=>r.map(transform)),holes:(home.holes||[]).map(r=>r.map(transform)),walls:home.walls.map(w=>({...w,points:w.points.map(transform)})),items:home.items.map(transform),openings:home.openings.map(o=>({...transform(o),angle:Math.atan2(Math.sin((o.angle||0)*Math.PI/180)*sy,Math.cos((o.angle||0)*Math.PI/180)*sx)*180/Math.PI}))};
+  return {...home,boundary:home.boundary.map(transform),sections:getSections(home).map(s=>({...s,points:s.points.map(transform)})),outlines:floorOutlines(home).map(r=>r.map(transform)),holes:(home.holes||[]).map(r=>r.map(transform)),walls:home.walls.map(w=>({...w,points:w.points.map(transform)})),stairs:(home.stairs||[]).map(transform),items:home.items.map(transform),openings:home.openings.map(o=>({...transform(o),angle:Math.atan2(Math.sin((o.angle||0)*Math.PI/180)*sy,Math.cos((o.angle||0)*Math.PI/180)*sx)*180/Math.PI}))};
 }
 export function deleteSelection(home,s){
   const sections=getSections(home).filter(section=>!s.boundary&&!s.sections?.includes(section.id));
   const removedJoins=[...new Set([...(home.removedJoins||[]),...home.walls.filter(w=>s.walls.includes(w.id)&&w.joinKey).map(w=>w.joinKey)])];
   const changed={...home,sections,removedJoins,boundary:s.boundary||!sections.length?[]:home.boundary,outlines:s.boundary||!sections.length?[]:home.outlines,walls:s.boundary?[]:home.walls.filter(w=>!s.walls.includes(w.id)),items:home.items.filter(i=>!s.items.includes(i.id)||i.locked),openings:s.boundary?[]:home.openings.filter(o=>!s.openings.includes(o.id))};
+  changed.stairs=(home.stairs||[]).filter(stair=>!s.boundary&&!s.stairs?.includes(stair.id)&&!getSections(home).some(section=>s.sections?.includes(section.id)&&belongs(stair,section)));
   return s.sections?.length?normalizePlan(changed):changed;
 }
