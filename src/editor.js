@@ -1,5 +1,6 @@
-import { CATALOG, distanceToSegment, floorOutlines, furnitureVisualBounds, getSections, normalizePlan, PLAN_UNIT, pointInPolygon, snapSection, withFloorOrigins } from './model.js';
+import { CATALOG, distanceToSegment, extendDivider, floorOutlines, furnitureVisualBounds, getSections, normalizePlan, PLAN_UNIT, pointInPolygon, snapSection, withFloorOrigins } from './model.js';
 import {stairBounds} from './stairs.js';
+import {objectFloorLevel} from './floors.js';
 import {reorderObjects} from './layers.js';
 
 export const emptySelection=()=>({boundary:false,sections:[],walls:[],items:[],openings:[],stairs:[]});
@@ -95,7 +96,8 @@ if(s.boundary)return {...home,boundary:home.boundary.map(p=>shifted(p,delta)),se
   const movedNodes=[];
   for(const w of home.walls)if(s.walls.includes(w.id))for(const p of w.points)movedNodes.push({from:p,to:constrainToOriginalBoundary(shifted(p,delta),p,home)});
   const moveNode=p=>movedNodes.find(n=>same(n.from,p))?.to||p;
-  return {...home,walls:home.walls.map(w=>({...w,points:w.points.map(moveNode)})),stairs:(home.stairs||[]).map(i=>s.stairs?.includes(i.id)?shifted(i,delta):i),items:home.items.map(i=>s.items.includes(i.id)?shifted(i,delta):i),openings:home.openings.map(o=>{
+  const moveObject=i=>({...shifted(i,delta),level:objectFloorLevel(home,i)});
+  return {...home,walls:home.walls.map(w=>({...w,points:w.points.map(moveNode)})),stairs:(home.stairs||[]).map(i=>s.stairs?.includes(i.id)?moveObject(i):i),items:home.items.map(i=>s.items.includes(i.id)?moveObject(i):i),openings:home.openings.map(o=>{
     if(s.openings.includes(o.id))return shifted(o,delta);
     const wall=home.walls.find(w=>s.walls.includes(w.id)&&w.points.some((p,i)=>i>0&&distanceToSegment(o,w.points[i-1],p)<1));
     return wall?shifted(o,delta):o;
@@ -108,7 +110,12 @@ export function moveVertex(home,wallId,index,target){
   if(!original)return home;
   if(!sectionId&&wallId!=='boundary'){
     home=detachJoins(home,[wallId]);
-    const constrained=constrainToOriginalBoundary(target,original,home);
+    let constrained=constrainToOriginalBoundary(target,original,home);
+    const wall=home.walls.find(w=>w.id===wallId);
+    if(index===0||index===wall.points.length-1){
+      const draft={...wall,points:wall.points.map((p,i)=>i===index?constrained:p)};
+      constrained=extendDivider(home,draft,{indices:[index]}).points[index];
+    }
     const replace=p=>same(p,original)?{...constrained}:p;
     return {...home,walls:home.walls.map(w=>({...w,points:w.points.map(replace)})),openings:home.openings.map(o=>same(o,original)?{...o,...constrained}:o)};
   }
@@ -127,7 +134,7 @@ function transformFloorSections(home,ids,transform,snap=false){
   const moved=transformed;
   // Carry belongings with the selected section; generated seams are rebuilt
   // from the new layout rather than dragged as loose wall objects.
-  const movePoint=p=>{const section=chosen.find(s=>belongs(p,s));if(!section)return p;const before=transform(section.points[0]),after=transformed.find(s=>s.id===section.id).points[0],q=transform(p);return {...p,x:q.x+after.x-before.x,y:q.y+after.y-before.y};};
+  const movePoint=p=>{const section=chosen.find(s=>belongs(p,s))||(p.id&&!originals.some(s=>belongs(p,s))?chosen.find(s=>s.level===objectFloorLevel(home,p)):null);if(!section)return p;const before=transform(section.points[0]),after=transformed.find(s=>s.id===section.id).points[0],q=transform(p);return {...p,x:q.x+after.x-before.x,y:q.y+after.y-before.y};};
   return normalizePlan({...home,sections:[...stationary,...moved],walls:home.walls.filter(w=>w.source!=='join').map(w=>({...w,points:w.points.map(movePoint)})),stairs:(home.stairs||[]).map(movePoint),items:home.items.map(movePoint),openings:home.openings.map(movePoint)});
 }
 export function outlineBounds(boundary){
@@ -138,6 +145,20 @@ export function outlineBounds(boundary){
 export function outlineCorners(boundary){
   const b=outlineBounds(boundary);if(!b)return [];
   return [{x:b.x,y:b.y},{x:b.x+b.width,y:b.y},{x:b.x+b.width,y:b.y+b.height},{x:b.x,y:b.y+b.height}];
+}
+// Only real bends get corner targets: sampled ellipses keep their edge cursors.
+// Scale about the opposite bounds corner, carrying the entire footprint with it.
+export function outlineCornerControls(points){
+  const b=outlineBounds(points);if(!b||!b.width||!b.height)return [];
+  const cx=b.x+b.width/2,cy=b.y+b.height/2;
+  return points.flatMap((p,index)=>{
+    const prev=points[(index+points.length-1)%points.length],next=points[(index+1)%points.length];
+    const ax=p.x-prev.x,ay=p.y-prev.y,bx=next.x-p.x,by=next.y-p.y;
+    const lengths=Math.hypot(ax,ay)*Math.hypot(bx,by);
+    if(lengths<.01||Math.acos(Math.max(-1,Math.min(1,(ax*bx+ay*by)/lengths)))<Math.PI/7)return [];
+    const right=p.x>=cx,bottom=p.y>=cy;
+    return [{point:p,index,control:{...p,axis:'both',anchor:{x:right?b.x:b.x+b.width,y:bottom?b.y:b.y+b.height}},cursor:right===bottom?'nwse-resize':'nesw-resize'}];
+  });
 }
 export function outlineEdgeControls(points){
   const b=outlineBounds(points);if(!b)return [];

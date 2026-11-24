@@ -52,6 +52,157 @@ test('side borders continue into the open front without cap-end seams or a raise
   assert.equal(contains(mesh.silhouette,{x:400,y:470}),false,'the front remains open instead of receiving a wall face');
 });
 
+test('diagonal dividers keep constant height and parallel faces at cutaway junctions',()=>{
+  for(const [startX,x] of [[160,240],[160,460],[640,340],[640,560]]){
+    const home=homeWith([{id:'diagonal',points:[{x:startX,y:100},{x,y:500}]}]);
+    const before=JSON.stringify(home),mesh=buildRoomWalls(home);
+    const runs=mesh.edges.filter(e=>e.wallId==='diagonal');
+    assert.equal(runs.length,1,'a straight divider stays a single straight run');
+    assert.deepEqual(runs[0].a,{x:startX,y:100});assert.deepEqual(runs[0].b,{x,y:500});
+    assert.equal(runs[0].height,70,'the cutaway must not lower a divider endpoint');
+    for(const cap of mesh.surfaces.filter(s=>s.kind==='cap')){
+      assert.deepEqual(cap.plane,[0,1,cap.height],'caps use only a uniform vertical translation');
+      for(const [px,py] of cap.original.flat(2)){
+        const ground={x:px,y:py+cap.height};
+        assert.ok(mesh.projectedEdges.some(e=>{
+          if(e.exterior)return distanceToSegment(ground,e.a,e.b)<24.1;
+          const dx=e.b.x-e.a.x,dy=e.b.y-e.a.y;
+          return Math.abs((ground.x-e.a.x)*dy-(ground.y-e.a.y)*dx)/Math.hypot(dx,dy)<24.1;
+        }),'cutaway caps continue along the original straight run, never bend sideways');
+      }
+    }
+    for(const face of mesh.surfaces.filter(s=>s.kind==='face')){
+      assert.equal(face.height,70);
+      for(const [px,py] of face.original.flat(2)){
+        const elevation=face.plane[0]*px+face.plane[1]*py+face.plane[2]-py;
+        assert.ok(elevation>=-.001&&elevation<=70.001,'trimming a constant-height face never changes its extrusion');
+      }
+    }
+    const joint={x,y:500};
+    assert.ok(contains(mesh.rim,joint),'the divider connects to the continuous low rim');
+    const distances=mesh.rim.flatMap(poly=>poly.flatMap(ring=>ring.slice(1).map(([bx,by],i)=>distanceToSegment(joint,{x:ring[i][0],y:ring[i][1]},{x:bx,y:by}))));
+    assert.ok(Math.min(...distances)>5,'no diagonal end-cap seam crosses the joined front wall');
+    assert.equal(JSON.stringify(home),before,'joining render solids does not move the saved divider');
+  }
+});
+
+test('a diagonal cutaway meets the front border without a vertical end post',()=>{
+  for(const [startX,endX] of [[160,460],[640,340]]){
+    const home=homeWith([{id:'diagonal',points:[{x:startX,y:100},{x:endX,y:500}]}]);
+    const before=JSON.stringify(home),mesh=buildRoomWalls(home);
+    const middle={x:endX,y:465},continuation={x:endX+(endX-startX)*35/400,y:465};
+    assert.ok(contains(mesh.silhouette,middle),'the former end is part of the continuous wall face');
+    assert.equal(contains(mesh.rim,middle),false,'no upright cap return remains at the former end');
+    assert.ok(mesh.surfaces.some(s=>s.kind==='cap'&&s.height===70&&contains(s.geometry,continuation)),'the parallel cap reaches the front instead of tapering');
+    assert.ok(mesh.surfaces.filter(s=>s.height>0).every(s=>s.original.flat(2).every(([,y])=>y<=494.001)),'raised walls stop at the inside edge instead of slicing through the front border');
+    assert.equal(JSON.stringify(home),before,'the visual join never relocates the floor-plan endpoint');
+  }
+});
+
+test('a freestanding diagonal divider keeps its end instead of reaching the cutaway border',()=>{
+  const mesh=buildRoomWalls(homeWith([{id:'free',points:[{x:160,y:100},{x:460,y:470}]}]));
+  assert.ok(!mesh.surfaces.filter(s=>s.kind==='cap'&&s.height===70).some(s=>s.original.flat(2).some(([x,y])=>Math.abs(y-494)<.001&&Math.abs(x-480)<40)));
+});
+
+test('a shallow diagonal at a shared front junction does not pull the vertical cap into another room',()=>{
+  const home=homeWith([
+    {id:'vertical',points:[{x:460,y:100},{x:460,y:500}]},
+    {id:'horizontal',points:[{x:460,y:370},{x:700,y:370}]},
+    {id:'diagonal',points:[{x:460,y:500},{x:700,y:370}]},
+  ]);
+  const before=JSON.stringify(home),mesh=buildRoomWalls(home);
+  const diagonal=mesh.edges.filter(e=>e.wallId==='diagonal');
+  assert.equal(diagonal.length,1);
+  assert.deepEqual(diagonal[0].a,{x:460,y:500});assert.deepEqual(diagonal[0].b,{x:700,y:370});
+  assert.equal(diagonal[0].height,70);
+  const caps=mesh.surfaces.filter(s=>s.kind==='cap'&&s.height===70);
+  assert.ok(caps.every(s=>s.original.flat(2).every(([x,y])=>y<=410||x<=110||x>=450)),'no detached cap triangle crosses into the room left of the vertical wall');
+  assert.ok(contains(mesh.silhouette,{x:460,y:470}),'the shared vertical return stays connected');
+  assert.ok(contains(mesh.rim,{x:462,y:470}),'the vertical divider keeps its visible strip down to the front border');
+  assert.ok(!caps.some(s=>contains(s.geometry,{x:400,y:450})),'the neighboring floor is not covered by a warped cap');
+  assert.doesNotMatch(wallGeometryPath(mesh.silhouette),/NaN|Infinity/);
+  assert.equal(JSON.stringify(home),before);
+});
+
+test('decorate anchors a diagonal to the same low-front and raised-corner junctions as Build',()=>{
+  const home=homeWith([
+    {id:'vertical',points:[{x:460,y:100},{x:460,y:500}]},
+    {id:'horizontal',points:[{x:460,y:370},{x:700,y:370}]},
+    // Build's thick stroke joins this 3px offset to the same visible corner.
+    {id:'diagonal',points:[{x:460,y:500},{x:700,y:373}]},
+  ]);
+  home.openings=[{id:'window-a',type:'window',x:580,y:436.5,angle:Math.atan2(-127,240)*180/Math.PI},{id:'window-b',type:'window',x:615,y:436.5-35*127/240,angle:Math.atan2(-127,240)*180/Math.PI}];
+  const before=JSON.stringify(home),mesh=buildRoomWalls(home);
+  const source=mesh.edges.find(e=>e.wallId==='diagonal'),display=mesh.projectedEdges.find(e=>e.wallId==='diagonal');
+  assert.deepEqual(source.a,{x:460,y:500});assert.deepEqual(source.b,{x:700,y:373});
+  assert.deepEqual({x:display.a.x,y:display.a.y-70},{x:460,y:494},'the thin top edge reaches the low front corner, not the side wall above it');
+  assert.deepEqual({x:display.b.x,y:display.b.y-70},{x:700,y:300},'the other end shares the horizontal divider corner with no visible gap');
+  for(const p of [{x:460,y:493.9},{x:700,y:300}])assert.ok(contains(mesh.rim,p),'both displayed junctions belong to the connected rim');
+  assert.equal(mesh.openings.length,1,'neighboring windows still merge');
+  assert.ok(distanceToSegment(mesh.openings[0],display.a,display.b)<.001,'the merged window follows the displayed divider instead of returning to the source line');
+  assert.equal(display.height,70,'the entire wall keeps one extrusion height');
+  assert.equal(JSON.stringify(home),before,'corner registration does not edit the saved floor plan');
+});
+
+test('free and shared diagonal joins both leave one uninterrupted front border',()=>{
+  const home=homeWith([
+    {id:'left-diagonal',points:[{x:160,y:100},{x:300,y:500}]},
+    {id:'shared',points:[{x:460,y:100},{x:460,y:500}]},
+    {id:'right-diagonal',points:[{x:460,y:500},{x:700,y:370}]},
+  ]);
+  const before=JSON.stringify(home),mesh=buildRoomWalls(home);
+  const raised=mesh.surfaces.filter(s=>s.height>0);
+  for(const x of [295,300,305,320,325,330,456,460,464]){
+    assert.ok(contains(mesh.rim,{x,y:500}),'the front border remains continuous under both diagonals');
+    assert.equal(raised.some(s=>contains(s.original,{x,y:500})),false,'no raised face or cap is drawn through the front band');
+  }
+  assert.ok(contains(mesh.rim,{x:462,y:470}),'the vertical strip remains visible below the diagonal junction');
+  assert.ok(contains(mesh.silhouette,{x:462,y:470}),'removing an end seam does not remove the wall itself');
+  assert.equal(JSON.stringify(home),before,'both diagonals retain their exact floor-plan positions');
+});
+
+test('a branch meeting either diagonal direction has a smooth miter instead of a square-cap notch',()=>{
+  for(const direction of [1,-1]){
+    const home=homeWith([
+      {id:'diagonal',points:[{x:200,y:300-direction*200},{x:600,y:300+direction*200}]},
+      {id:'branch',points:[{x:400,y:100},{x:400,y:300}]},
+    ]);
+    const before=JSON.stringify(home),mesh=buildRoomWalls(home);
+    const formerBump={x:400-direction*3.2,y:233.2};
+    assert.equal(mesh.surfaces.some(s=>s.kind==='cap'&&s.height===70&&contains(s.original,formerBump)),false,'the branch cannot protrude beyond the diagonal cap edge');
+    assert.ok(contains(mesh.faces,{x:400,y:260}),'adjoining wall faces form one filled surface');
+    const p={x:400,y:260};
+    const distances=mesh.faces.flatMap(poly=>poly.flatMap(ring=>ring.slice(1).map(([x,y],i)=>distanceToSegment(p,{x:ring[i][0],y:ring[i][1]},{x,y}))));
+    assert.ok(Math.min(...distances)>10,'no individual face boundary crosses the merged wall face');
+    assert.doesNotMatch(wallGeometryPath(mesh.faces),/NaN|Infinity/);
+    assert.equal(JSON.stringify(home),before,'mitering never edits the saved floor-plan points');
+  }
+});
+
+test('mitered T junctions fill their centre instead of outlining a triangular hole',()=>{
+  const home=homeWith([
+    {id:'upper',points:[{x:400,y:100},{x:400,y:300}]},
+    {id:'lower',points:[{x:400,y:300},{x:400,y:500}]},
+    {id:'branch',points:[{x:400,y:300},{x:700,y:300}]},
+  ]);
+  const mesh=buildRoomWalls(home),p={x:400,y:230};
+  assert.ok(contains(mesh.rim,p),'the shared node is solid cap material');
+  const distances=mesh.rim.flatMap(poly=>poly.flatMap(ring=>ring.slice(1).map(([x,y],i)=>distanceToSegment(p,{x:ring[i][0],y:ring[i][1]},{x,y}))));
+  assert.ok(Math.min(...distances)>3,'no triangular outline cuts through the junction centre');
+});
+
+test('a low front window cannot notch the tall diagonal meeting that border',()=>{
+  const home=homeWith([
+    {id:'vertical',points:[{x:400,y:100},{x:400,y:500}]},
+    {id:'diagonal',points:[{x:400,y:500},{x:700,y:350}]},
+  ]);
+  const plain=buildRoomWalls(home);
+  const mesh=buildRoomWalls({...home,openings:[{id:'front-window',type:'window',x:440,y:500,angle:180}]});
+  assert.equal(mesh.openings[0].height,0);
+  assert.deepEqual(mesh.faces,plain.faces,'the low opening cuts only its supporting border, not the adjoining wall face');
+  assert.equal(mesh.surfaces.some(s=>s.kind==='cap'&&s.height===0&&contains(s.geometry,{x:440,y:500})),false,'the front window still cuts the low border');
+});
+
 test('polygon side bends keep raised walls with continuous mitered caps and no transverse cuts',()=>{
   const boundary=[{x:100,y:250},{x:160,y:80},{x:260,y:120},{x:290,y:180},{x:230,y:360},{x:120,y:370}];
   const mesh=buildRoomWalls(normalizePlan({...initialHome(),boundary}));

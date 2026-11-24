@@ -1,0 +1,19 @@
+.app { cursor: var(--cursor-default, default); }
+.app button:not(:disabled), .app a, .app select, .app [role="button"],
+.app .topdown-opening, .app .sticker-upload-options { cursor: var(--cursor-pointer, pointer); }
+.app button:disabled { cursor: var(--cursor-default, default); }
+.app input, .app textarea, .app [contenteditable="true"], .app .editable-dimension-label { cursor: text; }
+.app input:is([type="checkbox"],[type="radio"],[type="range"],[type="color"],[type="file"]) { cursor: var(--cursor-pointer, pointer); }
+.app .room-scene { cursor: var(--cursor-default, default); }
+.app .plan-outer-wall, .app .plan-divider, .app .editable-wall,
+.app .group-selection, .app .canvas-blueprint, .app .divider-body-hit { cursor: var(--cursor-move, move); }
+.app .furniture.can-drag, .app .plan-furniture, .app .stair-object { cursor: var(--cursor-grab, grab); }
+.app .furniture.can-drag:active, .app .plan-furniture:active, .app .stair-object:active { cursor: var(--cursor-grabbing, grabbing); }
+.app .resize-handle { cursor: var(--cursor-nwse-resize, nwse-resize); }
+.app .plan-vertex, .app .divider-end-hit { cursor: var(--cursor-crosshair, crosshair); }
+/* The active drawing tool owns the cursor even over an existing object. */
+.app .building:is(.tool-rectangle,.tool-ellipse,.tool-polygon,.tool-boundary,.tool-freeform,.tool-wall,.tool-door,.tool-window,[class*="tool-stairs"]) .room-scene,
+.app .building:is(.tool-rectangle,.tool-ellipse,.tool-polygon,.tool-boundary,.tool-freeform,.tool-wall,.tool-door,.tool-window,[class*="tool-stairs"]) .room-scene * { cursor: var(--cursor-crosshair, crosshair); }
+.app .building.tool-eraser .room-scene, .app .building.tool-eraser .room-scene * { cursor: var(--cursor-cell, cell); }
+.app .workspace.camera-panning .room-scene,
+.app .workspace.camera-panning .room-scene * { cursor: var(--cursor-grabbing, grabbing) !important; }

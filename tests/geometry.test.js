@@ -5,32 +5,41 @@ import { addDivider, canMove, extendDivider, initialHome, migrateHome, normalize
 const boundary=rectangleFromPoints({x:200,y:150},{x:800,y:550});
 const makeHome=walls=>({...initialHome(),boundary,walls});
 const line=(id,a,b)=>({id,curved:false,points:[a,b]});
-test('a short divider automatically joins the next divider and exterior',()=>{
+test('divider endpoints join only when close to the next divider and exterior',()=>{
   const home=normalizePlan(makeHome([line('vertical',{x:500,y:150},{x:500,y:550})]));
-  const wall=extendDivider(home,line('short',{x:280,y:350},{x:410,y:350}));
+  const wall=extendDivider(home,line('short',{x:210,y:350},{x:490,y:350}));
   assert.deepEqual(wall.points,[{x:200,y:350},{x:500,y:350}]);
   const saved=addDivider(home,wall);
   assert.equal(saved.walls.length,3);
   assert.deepEqual(normalizePlan(saved),saved);
 });
-test('a stroke that passes a divider extends forward to the next wall',()=>{
+test('passing a divider does not extend the endpoint across the next room',()=>{
   const home=normalizePlan(makeHome([line('first',{x:400,y:150},{x:400,y:550}),line('next',{x:650,y:150},{x:650,y:550})]));
   const wall=extendDivider(home,line('crossing',{x:200,y:350},{x:480,y:350}));
-  assert.deepEqual(wall.points,[{x:200,y:350},{x:650,y:350}]);
+  assert.deepEqual(wall.points,[{x:200,y:350},{x:480,y:350}]);
   const saved=addDivider(home,wall);
   assert.ok(saved.walls.some(w=>w.points.some(p=>p.x===400&&p.y===350)));
-  assert.equal(saved.walls.some(w=>w.points.some(p=>p.x>650&&p.y===350)),false);
+  assert.equal(saved.walls.some(w=>w.id.startsWith('crossing')&&w.points.some(p=>p.x>480&&p.y===350)),false);
+});
+
+test('near endpoints retract to a crossed divider or extend to the next close divider',()=>{
+  const home=normalizePlan(makeHome([line('first',{x:400,y:150},{x:400,y:550}),line('next',{x:650,y:150},{x:650,y:550})]));
+  for(const [end,expected] of [[410,400],[640,650],[660,650],[525,525]]){
+    const result=extendDivider(home,line('new',{x:200,y:350},{x:end,y:350}));
+    assert.ok(Math.abs(result.points[1].x-expected)<.001);
+    assert.equal(result.points[1].y,350);
+  }
 });
 test('a divider ending on a wall stays attached without overshooting',()=>{
   const home=normalizePlan(makeHome([line('stop',{x:500,y:150},{x:500,y:550})]));
   const wall=line('attached',{x:200,y:350},{x:500,y:350});
   assert.deepEqual(extendDivider(home,wall),wall);
 });
-test('a curved divider extends its end tangents without moving its interior points',()=>{
-  const home=normalizePlan(makeHome([])),wall={id:'curve',curved:true,points:[{x:300,y:300},{x:350,y:300},{x:450,y:350},{x:500,y:350}]};
+test('a curved divider snaps only nearby ends along their tangents without moving interior points',()=>{
+  const home=normalizePlan(makeHome([])),wall={id:'curve',curved:true,points:[{x:210,y:300},{x:350,y:300},{x:450,y:350},{x:790,y:350}]};
   const extended=extendDivider(home,wall);
   assert.deepEqual(extended.points,[{x:200,y:300},{x:350,y:300},{x:450,y:350},{x:800,y:350}]);
-  assert.deepEqual(wall.points[0],{x:300,y:300});
+  assert.deepEqual(wall.points[0],{x:210,y:300});
 });
 
 test('a new player starts with no floor plan, furniture, walls, or openings',()=>{

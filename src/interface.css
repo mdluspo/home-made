@@ -650,6 +650,11 @@
   margin-bottom: 22px; background: none; border: 0;
 }
 .sticker-floating-preview img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
+.sticker-floating-preview { position: relative; }
+.sticker-cleanup-status { position: absolute; bottom: 0; right: 0; display: flex; align-items: center; gap: 7px; padding: 6px 10px; border-radius: 999px; background: #fffdf1ed; color: #526546; font-size: 11px; }
+.sticker-cleanup-strength { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 7px 14px; color: #526546; font-size: 12px; margin: 0 0 12px; }
+.sticker-cleanup-strength input { width: 100%; min-width: 0; accent-color: #829767; }
+.sticker-cleanup-strength small { grid-column: 1 / -1; color: #68765b; font-size: 10px; }
 .sticker-name-input {
   width: 100%; padding: 13px 17px; border: 1px solid #9aaa83; border-radius: 12px;
   background: #fffdf1ee; color: #526546; font-size: 14px;

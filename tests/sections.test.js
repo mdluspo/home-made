@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { addFloorSection, initialHome, nextFloorLevel, normalizePlan, planArea, pointInHome, rectangleFromPoints } from '../src/model.js';
-import { deleteSelection, emptySelection, moveSelection, moveVertex, outlineBounds, outlineControls, outlineCorners, outlineEdgeControls, resizeOutline } from '../src/editor.js';
+import { deleteSelection, emptySelection, moveSelection, moveVertex, outlineBounds, outlineControls, outlineCorners, outlineCornerControls, outlineEdgeControls, resizeOutline } from '../src/editor.js';
 
 const rect=(x,y,w,h)=>rectangleFromPoints({x,y},{x:x+w,y:y+h});
 const base=()=>normalizePlan(addFloorSection(initialHome(),rect(100,150,200,200),'rectangle'));
@@ -221,4 +221,21 @@ test('floor sides use axis resize cursors and resize without morphing vertices',
   assert.equal(new Set(wider.sections[0].points.map(p=>p.x)).size,2);
   const top=edges[0],taller=resizeOutline(home,top.index,{x:top.control.x,y:top.control.y-60},{sectionId:section.id,control:top.control});
   assert.deepEqual(outlineBounds(taller.sections[0].points),{x:100,y:90,width:200,height:260});
+});
+
+test('real floor corners diagonally resize the entire footprint about the opposite corner',()=>{
+  const home=base(),section=home.sections[0],controls=outlineCornerControls(section.points);
+  assert.deepEqual(controls.map(c=>c.cursor),['nwse-resize','nesw-resize','nwse-resize','nesw-resize']);
+  const corner=controls[0],result=resizeOutline(home,corner.index,{x:50,y:100},{sectionId:section.id,control:corner.control});
+  assert.deepEqual(outlineBounds(result.sections[0].points),{x:50,y:100,width:250,height:250});
+  assert.equal(new Set(result.sections[0].points.map(p=>p.x)).size,2);
+  assert.equal(new Set(result.sections[0].points.map(p=>p.y)).size,2);
+  assert.deepEqual(result.sections[0].points[2],section.points[2]);
+});
+
+test('curved samples and collinear joins do not create diagonal corner targets',()=>{
+  const ellipse=Array.from({length:64},(_,i)=>({x:400+100*Math.cos(i/32*Math.PI),y:350+80*Math.sin(i/32*Math.PI)}));
+  assert.equal(outlineCornerControls(ellipse).length,0);
+  const corners=outlineCornerControls([{x:0,y:0},{x:50,y:0},{x:100,y:0},{x:100,y:100},{x:0,y:100}]);
+  assert.equal(corners.length,4);assert.ok(corners.every(c=>c.index!==1));
 });

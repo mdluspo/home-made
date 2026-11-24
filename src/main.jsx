@@ -13,7 +13,7 @@ import { FurnitureToolbar } from './FurnitureToolbar.jsx';
 import {DimensionEditor} from './DimensionEditor.jsx';
 import {FurnitureCard,StickerDialog} from './StickerDialog.jsx';
 import {BuildPlans,FloorStack,FloorSwitcher,FloorOverview,StairInspector} from './FloorViews.jsx';
-import {floorAtPoint,floorHome,stackLayers,stairTravel} from './floors.js';
+import {floorAtPoint,floorHome,objectFloorLevel,stackLayers,stairTravel} from './floors.js';
 import {CanvasBlueprints,BlueprintToolbar} from './Blueprints.jsx';
 import {changeBlueprintSource,makeBlueprint} from './blueprints.js';
 import {orderedObjects,reorderObjects} from './layers.js';
@@ -24,6 +24,9 @@ import { useWorld } from './useWorld.js';
 import './styles.css';
 import './game.css';
 import './interface.css';
+import './cursors.css';
+import {cursorStyles,gameCursor} from './cursors.js';
+import {makeStickerCutout} from './stickerBackground.js';
 
 const CATEGORIES = [{ name: 'All pieces', icon: Grid2X2 }, { name: 'Furniture', icon: Armchair }, { name: 'Plants', icon: Sprout }, { name: 'Decor', icon: Flower2 }, { name: 'Lighting', icon: Lightbulb }, { name: 'Kitchen', icon: Coffee }, { name: 'Bedroom', icon: Moon }];
 const iconProps = { size: 19, strokeWidth: 1.7 };
@@ -107,13 +110,26 @@ function App() {
   const [profileColor, setProfileColor] = useState('#a2ad83');
   const [upload, setUpload] = useState(null);
   const [removeBg, setRemoveBg] = useState(true);
+  const [cutoutStrength,setCutoutStrength]=useState(45),[cutoutBusy,setCutoutBusy]=useState(false);
+  useEffect(()=>{
+    if(modal!=='upload'||!upload?.original||!removeBg){setCutoutBusy(false);return;}
+    let cancelled=false;setCutoutBusy(true);
+    const original=upload.original;
+    const timer=setTimeout(async()=>{
+      try{
+        const processed=await makeStickerCutout(original,cutoutStrength);
+        if(!cancelled)setUpload(current=>current?.original===original?{...current,processed,processedStrength:cutoutStrength}:current);
+      }catch{if(!cancelled){setRemoveBg(false);notify('Background cleanup failed. The original image has been kept.');}}
+      finally{if(!cancelled)setCutoutBusy(false);}
+    },150);
+    return()=>{cancelled=true;clearTimeout(timer);};
+  },[modal,upload?.original,removeBg,cutoutStrength]);
   const [editingStickerId, setEditingStickerId] = useState(null);
   const [editingStickerName, setEditingStickerName] = useState('');
   const [busy, setBusy] = useState(false);
   const svgRef = useRef(), groupRef = useRef(), workspaceRef = useRef(), fileRef = useRef();
   const dragging = useRef(null), drawing = useRef(null), polygonDraft = useRef([]), latestPoint = useRef(position), keys = useRef(new Set()), latest = useRef({ home, mode, page });
   const marqueeRef=useRef(null);
-  const floorClickRef=useRef(null);
   const cameraDrag=useRef(null),suppressContextUntil=useRef(0);
   const visibleHome=preview?.home||home;
   const floorLayers=useMemo(()=>stackLayers(visibleHome,activeLevel),[visibleHome,activeLevel]);
@@ -175,7 +191,7 @@ function App() {
     if(activeHome.boundary.length<3)return notify('Build a space for your things first. Draw your home’s outline in Build mode.');
     if (home.items.length >= 300) return notify('Your home is full of lovely things. Remove a piece to make room.');
     const spawn=homeSpawn(activeHome);
-    const item = { id: makeId(), type, x: point?.x ?? spawn.x, y: point?.y ?? spawn.y, scale: 1, rotation: 0 };
+    const item = { id: makeId(), type, x: point?.x ?? spawn.x, y: point?.y ?? spawn.y, scale: 1, rotation: 0, level:(point&&mode==='build'?floorAtPoint(home,point):floorLayers.active)?.level||activeLevel };
     commit(h => ({ ...h, items: [...h.items, item] }));
     setSelected(item.id);setSelection({...emptySelection(),items:[item.id]}); setMode('decorate'); setPage('home'); setTool('select');
   };
@@ -237,13 +253,11 @@ function App() {
       commit(h => ({ ...h, openings: [...h.openings, { id: makeId(), type: tool, ...nearest.point, angle: nearest.angle, open: false }] })); return;
     }
     if (mode === 'build' && tool.startsWith('stairs') && buildable) {
-      floorClickRef.current=null;
       const floor=floorAtPoint(home,p);
       if (!floor) return notify('Place the stairs inside a floor plan.');
       const kind=tool==='stairs'?'straight':tool.slice(7);
-      const stair={id:makeId(),kind,x:p.x,y:p.y,rotation:0,scale:1,toLevel:floorLayers.floors.find(f=>f.level>floor.level)?.level||nextFloorLevel(home)};
+      const stair={id:makeId(),kind,x:p.x,y:p.y,rotation:0,scale:1,level:floor.level,toLevel:floorLayers.floors.find(f=>f.level>floor.level)?.level||nextFloorLevel(home)};
       commit(h => ({ ...h, stairs: [...(h.stairs || []),stair] }));
-      setTool('select');setSelection({...emptySelection(),stairs:[stair.id]});
       return;
     }
     if(tool==='select'&&editable){
@@ -260,7 +274,6 @@ function App() {
       setCamera({x:d.camera.x+p.x-d.start.x,y:d.camera.y+p.y-d.start.y});return;
     }
     const p = pointFromEvent(e);
-    if(floorClickRef.current&&Math.hypot(e.clientX-floorClickRef.current.x,e.clientY-floorClickRef.current.y)>5)floorClickRef.current=null;
     if(marqueeRef.current){marqueeRef.current={...marqueeRef.current,end:pointFromEvent(e,true)};setMarquee(marqueeRef.current);return;}
     if(mode==='build'&&tool==='polygon'&&polygonDraft.current.length)setStroke([...polygonDraft.current,snapPoint(p)]);
     if (dragging.current) {
@@ -300,13 +313,6 @@ function App() {
       if(svgRef.current.hasPointerCapture(d.pointerId))svgRef.current.releasePointerCapture(d.pointerId);
       if(!d.moved)onFloorContext(e);return;
     }
-    if(floorClickRef.current){
-      const {sectionId}=floorClickRef.current;floorClickRef.current=null;
-      const picked=home.sections?.find(s=>s.id===sectionId);if(picked?.level)setActiveLevel(picked.level);
-      drawing.current=null;polygonDraft.current=[];setStroke([]);setPreview(null);
-      setTool('select');setSelected(null);setSelectedWall(`section:${sectionId}`);
-      setSelection({...emptySelection(),sections:[sectionId]});return;
-    }
     if(marqueeRef.current){
       const m=marqueeRef.current,rect=boxFromPoints(m.start,m.end);
       const next=rect.width>3||rect.height>3?mergeSelection(m.base,selectInBox(mode==='build'?visibleHome:activeHome,rect,mode)):m.base;
@@ -336,6 +342,7 @@ function App() {
     dragging.current=null; drawing.current=null; setPreview(null); setStroke([]);setDraggedObjects([]);
   };
   const startGroupDrag=(e,next=selection)=>{
+    if(e.button!==0||tool!=='select'||mode==='explore'||!editable)return;
     e.stopPropagation();setSelection(next);
     setDraggedObjects([...next.items,...(next.stairs||[])]);
     if(mode==='build'){const floor=floorAtPoint(home,pointFromEvent(e));if(floor)setActiveLevel(floor.level);}
@@ -343,19 +350,20 @@ function App() {
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const startBlueprintDrag=(e,blueprint)=>{
-    if(e.button!==0||mode!=='build'||!buildable)return;
+    if(e.button!==0||mode!=='build'||tool!=='select'||!buildable)return;
     e.preventDefault();e.stopPropagation();setTool('select');setSelectedBlueprint(blueprint.id);setSelected(null);setSelectedWall(null);setSelection(emptySelection());
-    drawing.current=null;polygonDraft.current=[];floorClickRef.current=null;marqueeRef.current=null;setMarquee(null);setStroke([]);
+    drawing.current=null;polygonDraft.current=[];marqueeRef.current=null;setMarquee(null);setStroke([]);
     dragging.current={blueprintId:blueprint.id,home,start:pointFromEvent(e)};
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const toggleSelected=(kind,id)=>{
+    if(tool!=='select')return;
     const list=selection[kind]||[];
     const next={...selection,[kind]:list.includes(id)?list.filter(v=>v!==id):[...list,id]};
     setSelection(next);setSelected(null);setSelectedWall(null);
   };
   const onItemDown = (e,item) => {
-    if(e.button!==0||mode==='explore'||!editable||mode==='build'&&tool!=='select')return;
+    if(e.button!==0||mode==='explore'||!editable||tool!=='select')return;
     e.stopPropagation();
     setSelectedWall(null);
     if(e.shiftKey){toggleSelected('items',item.id);return;}
@@ -364,18 +372,18 @@ function App() {
     startGroupDrag(e,selection.items.includes(item.id)?selection:{...emptySelection(),items:[item.id]});
   };
   const onStairDown=(e,stair)=>{
-    if(e.button!==0||mode==='explore'||!buildable)return;
-    e.stopPropagation();setTool('select');setSelected(null);setSelectedWall(null);
+    if(e.button!==0||mode==='explore'||tool!=='select'||!buildable)return;
+    e.stopPropagation();setSelected(null);setSelectedWall(null);
     if(e.shiftKey){toggleSelected('stairs',stair.id);return;}
     startGroupDrag(e,selection.stairs?.includes(stair.id)?selection:{...emptySelection(),stairs:[stair.id]});
   };
   const startWallDrag = (e,wall,handle) => {
     if (e.button!==0 || mode!=='build' || !buildable) return;
+    if (tool==='eraser') {e.stopPropagation();commit(h=>({...h,walls:h.walls.filter(w=>w.id!==wall.id)}));return;}
+    if(tool!=='select')return;
     const floor=floorAtPoint(home,pointFromEvent(e));if(floor)setActiveLevel(floor.level);
-    if (tool==='eraser') {commit(h=>({...h,walls:h.walls.filter(w=>w.id!==wall.id)}));return;}
-    if (tool==='door'||tool==='window') return;
-    e.stopPropagation();setTool('select');setSelected(null);
-    drawing.current=null;polygonDraft.current=[];floorClickRef.current=null;setStroke([]);
+    e.stopPropagation();setSelected(null);
+    drawing.current=null;polygonDraft.current=[];setStroke([]);
     if(e.shiftKey){toggleSelected('walls',wall.id);return;}
     setSelectedWall(wall.id);
     if(handle===undefined){startGroupDrag(e,selection.walls.includes(wall.id)&&!selection.boundary&&!selection.sections?.length?selection:{...emptySelection(),walls:[wall.id]});return;}
@@ -383,17 +391,12 @@ function App() {
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const startBoundaryDrag=(e,handle)=>{
-    if(e.button!==0||mode!=='build'||!buildable)return;
+    if(e.button!==0||mode!=='build'||tool!=='select'||!buildable)return;
     const picked=home.sections?.find(s=>s.id===handle?.sectionId);if(picked?.level)setActiveLevel(picked.level);
     const isHandle=handle?.kind==='vertex'||handle?.kind==='resize'||typeof handle==='number';
-    if(tool!=='select'&&!isHandle){
-      // A click picks the base; a drag still draws, including additions inside it.
-      if(handle?.kind==='body'&&!['door','window'].includes(tool))floorClickRef.current={sectionId:handle.sectionId,x:e.clientX,y:e.clientY};
-      return;
-    }
     const sectionId=handle?.sectionId,wallId=sectionId?`section:${sectionId}`:'boundary';
     e.stopPropagation();setSelectedWall(wallId);setSelected(null);
-    drawing.current=null;polygonDraft.current=[];floorClickRef.current=null;setStroke([]);
+    drawing.current=null;polygonDraft.current=[];setStroke([]);
     if(isHandle){setTool('select');setSelection({...emptySelection(),...(sectionId?{sections:[sectionId]}:{boundary:true})});}
     if(handle?.kind==='resize'){
       const p=pointFromEvent(e),control=handle.control;
@@ -415,11 +418,11 @@ function App() {
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const startOutlineBoxResize=(e,corner)=>{
-    if(e.button!==0||mode!=='build'||!buildable)return;
+    if(e.button!==0||mode!=='build'||tool!=='select'||!buildable)return;
     const sections=getSections(home).filter(s=>selection.boundary||selection.sections?.includes(s.id));
     const corners=outlineCorners(sections.flatMap(s=>s.points));if(corners.length!==4)return;
     e.preventDefault();e.stopPropagation();
-    drawing.current=null;polygonDraft.current=[];floorClickRef.current=null;marqueeRef.current=null;setMarquee(null);setStroke([]);
+    drawing.current=null;polygonDraft.current=[];marqueeRef.current=null;setMarquee(null);setStroke([]);
     // The box is padded outside the shape. Measure from the real shape corner,
     // preserving the pointer offset so padding never changes the resize scale.
     const p=pointFromEvent(e),control={...corners[corner],anchor:corners[(corner+2)%4],axis:'both'};
@@ -430,23 +433,23 @@ function App() {
     if(e.button!==0||mode!=='build'||tool!=='select'||!buildable)return;
     e.preventDefault();e.stopPropagation();setSelected(null);setSelectedBlueprint(null);setActiveLevel(level);setMeasurementEdit(null);
     setSelectedWall(sectionIds.length===1?`section:${sectionIds[0]}`:null);setSelection({...emptySelection(),sections:sectionIds});
-    drawing.current=null;polygonDraft.current=[];floorClickRef.current=null;marqueeRef.current=null;setMarquee(null);setStroke([]);
+    drawing.current=null;polygonDraft.current=[];marqueeRef.current=null;setMarquee(null);setStroke([]);
     const p=pointFromEvent(e);
     dragging.current={outlineResize:index,home,sectionIds,control,handleOffset:{x:p.x-control.x,y:p.y-control.y},proportional:outlineEditMode==='proportional'};
     svgRef.current.setPointerCapture(e.pointerId);
   };
-  const editMeasurement=(e,measurement)=>{
-    if(mode!=='build'||!buildable)return;
+  const editMeasurement=tool==='select'&&buildable?(e,measurement)=>{
+    if(mode!=='build'||tool!=='select'||!buildable)return;
     const label=e.currentTarget.getBoundingClientRect(),workspace=workspaceRef.current.getBoundingClientRect();
     const position={left:Math.max(12,Math.min(workspace.width-252,label.left+label.width/2-workspace.left-120)),top:Math.max(12,Math.min(workspace.height-240,label.bottom-workspace.top+8))};
-    drawing.current=null;polygonDraft.current=[];floorClickRef.current=null;dragging.current=null;setPreview(null);setStroke([]);setTool('select');setSelected(null);setSelectedBlueprint(null);
+    drawing.current=null;polygonDraft.current=[];dragging.current=null;setPreview(null);setStroke([]);setSelected(null);setSelectedBlueprint(null);
     if(measurement.kind==='wall'){
       setSelectedWall(measurement.wallId);setSelection({...emptySelection(),walls:[measurement.wallId]});
     }else{
       setSelection({...emptySelection(),sections:measurement.sectionIds});setSelectedWall(measurement.sectionIds.length===1?`section:${measurement.sectionIds[0]}`:null);
     }
     setMeasurementEdit({measurement,position,value:Math.hypot(measurement.b.x-measurement.a.x,measurement.b.y-measurement.a.y)/PLAN_UNIT});
-  };
+  }:undefined;
   const saveMeasurement=value=>{
     if(!buildable||!measurementEdit)return 'Building permission is required.';
     const result=setPlanMeasurement(home,measurementEdit.measurement,value);
@@ -454,7 +457,7 @@ function App() {
     commit(result.home);setMeasurementEdit(null);return null;
   };
   const onFloorContext=e=>{
-    if(mode!=='build'||!buildable)return;
+    if(mode!=='build'||tool!=='select'||!buildable)return;
     e.preventDefault();
     const p=pointFromEvent(e),sections=getSections(home);
     const section=[...sections].reverse().find(s=>pointInPolygon(p,s.points)||s.points.some((a,i)=>distanceToSegment(p,a,s.points[(i+1)%s.points.length])<12));
@@ -520,14 +523,15 @@ function App() {
       if(['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)||e.target.isContentEditable) return;
       if(modal||editingStickerId||measurementEdit) return;
       if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'&&editable){e.preventDefault();e.shiftKey?redo():undo();return;}
-      if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='d'&&mode==='decorate'){e.preventDefault();duplicate();return;}
-      if((e.key==='Delete'||e.key==='Backspace')&&mode!=='explore'&&page==='home'){e.preventDefault();removeSelected();}
+      if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='d'&&mode==='decorate'&&tool==='select'){e.preventDefault();duplicate();return;}
+      if((e.key==='Delete'||e.key==='Backspace')&&mode!=='explore'&&page==='home'&&tool==='select'){e.preventDefault();removeSelected();}
       if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='a'&&page==='home'&&mode!=='explore'){
+        e.preventDefault();if(tool!=='select')return;
         const scope=mode==='build'?visibleHome:activeHome;
         e.preventDefault();setTool('select');setSelectedWall(null);setSelected(null);setSelection({boundary:false,sections:mode==='build'?scope.sections.map(s=>s.id):[],walls:mode==='build'?scope.walls.map(w=>w.id):[],items:scope.items.filter(i=>!i.locked).map(i=>i.id),openings:mode==='build'?scope.openings.map(o=>o.id):[],stairs:(scope.stairs||[]).map(s=>s.id)});
       }
       if(e.key.toLowerCase()==='v'&&!e.ctrlKey&&!e.metaKey&&mode!=='explore')setTool('select');
-      if(e.key==='Escape'){floorClickRef.current=null;setFloorContext(null);setSelected(null);setSelectedBlueprint(null);setSelectedWall(null);setSelection(emptySelection());setTool('select');polygonDraft.current=[];setStroke([]);marqueeRef.current=null;setMarquee(null);dragging.current=null;setPreview(null);setDraggedObjects([]);}
+      if(e.key==='Escape'){setFloorContext(null);setSelected(null);setSelectedBlueprint(null);setSelectedWall(null);setSelection(emptySelection());setTool('select');polygonDraft.current=[];setStroke([]);marqueeRef.current=null;setMarquee(null);dragging.current=null;setPreview(null);setDraggedObjects([]);}
       if(mode==='explore'&&page==='home'){
         if(['w','a','s','d','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)){e.preventDefault();keys.current.add(e.key.toLowerCase());setSitting(false);}
         if(e.key.toLowerCase()==='e'&&!e.repeat) interact();
@@ -537,7 +541,7 @@ function App() {
     const clear=()=>keys.current.clear();
     window.addEventListener('keydown',keydown);window.addEventListener('keyup',keyup);window.addEventListener('blur',clear);
     return()=>{window.removeEventListener('keydown',keydown);window.removeEventListener('keyup',keyup);window.removeEventListener('blur',clear);keys.current.clear();};
-  },[mode,page,modal,editingStickerId,measurementEdit,editable,undo,redo,duplicate,removeSelected,interact,home,activeHome]);
+  },[mode,tool,page,modal,editingStickerId,measurementEdit,editable,undo,redo,duplicate,removeSelected,interact,home,activeHome]);
   useEffect(()=>{
     let frame,lastTime=performance.now(),lastSend=0;
     const tick=time=>{
@@ -585,7 +589,7 @@ function App() {
     const file=e.target.files?.[0];e.target.value='';if(!file)return;
     if(!['image/png','image/jpeg','image/webp'].includes(file.type))return notify('Choose a PNG, JPG, or WebP image.');
     if(file.size>15*1024*1024)return notify('Choose an image smaller than 15 MB.');
-    setBusy(true);setModal('upload');setUpload(null);setRemoveBg(true);setPanelOpen(true);setPage('home');setMode('decorate');
+    setBusy(true);setModal('upload');setUpload(null);setRemoveBg(true);setCutoutStrength(45);setPanelOpen(true);setPage('home');setMode('decorate');
     try{
       const source=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file);});
       const img=await new Promise((resolve,reject)=>{const i=new Image();i.onload=()=>resolve(i);i.onerror=reject;i.src=source;});
@@ -593,19 +597,11 @@ function App() {
       const canvas=document.createElement('canvas');canvas.width=Math.round(img.width*scale);canvas.height=Math.round(img.height*scale);
       const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(img,0,0,canvas.width,canvas.height);
       const original=canvas.toDataURL('image/png');
-      const data=ctx.getImageData(0,0,canvas.width,canvas.height),pixels=data.data,w=canvas.width,h=canvas.height;
-      const corners=[0,(w-1)*4,(h-1)*w*4,(h*w-1)*4];
-      const bg=[0,1,2].map(c=>corners.reduce((s,i)=>s+pixels[i+c],0)/4);
-      const visited=new Uint8Array(w*h),queue=[];
-      const push=(x,y)=>{if(x<0||y<0||x>=w||y>=h)return;const n=y*w+x;if(visited[n])return;visited[n]=1;queue.push(n);};
-      for(let x=0;x<w;x++){push(x,0);push(x,h-1);}for(let y=0;y<h;y++){push(0,y);push(w-1,y);}
-      let head=0;
-      while(head<queue.length){const n=queue[head++],i=n*4;const diff=Math.hypot(pixels[i]-bg[0],pixels[i+1]-bg[1],pixels[i+2]-bg[2]);if(diff>85&&pixels[i+3]>10)continue;pixels[i+3]=diff<45?0:Math.round(pixels[i+3]*(diff-45)/40);const x=n%w,y=Math.floor(n/w);push(x-1,y);push(x+1,y);push(x,y-1);push(x,y+1);}
-      ctx.putImageData(data,0,0);
-      setUpload({name:'',original,processed:canvas.toDataURL('image/png')});
+      setUpload({name:'',original,processed:original});
     }catch{notify('That image couldn’t be opened. Try another one.');setModal(null);}finally{setBusy(false);}
   };
   const saveUpload=()=>{
+    if(removeBg&&(cutoutBusy||upload?.processedStrength!==cutoutStrength))return notify('Wait for background cleanup to finish, or keep the original image.');
     if(!upload||!upload.name.trim())return notify('Give your sticker a name before adding it.');
     if(home.custom.length>=50)return notify('Your sticker book is full. Remove a custom sticker to add another.');
     const sticker={id:makeId(),name:upload.name.trim().slice(0,40),src:removeBg?upload.processed:upload.original};
@@ -628,7 +624,7 @@ function App() {
   const startFreshPlan=()=>{
     if(role!=='owner'||homeId!==profile?.homeId)return;
     commit(h=>({...initialHome(),name:h.name,custom:h.custom}));
-    dragging.current=null;drawing.current=null;polygonDraft.current=[];marqueeRef.current=null;floorClickRef.current=null;
+    dragging.current=null;drawing.current=null;polygonDraft.current=[];marqueeRef.current=null;
     setPreview(null);setStroke([]);setMarquee(null);setFloorContext(null);
     setSelected(null);setSelectedWall(null);setSelection(emptySelection());
     setPage('home');setMode('build');setTool('rectangle');setPanelOpen(false);setMenuOpen(false);setSitting(false);
@@ -672,9 +668,9 @@ function App() {
     const center=pointFromEvent({clientX:rect.left+rect.width/2,clientY:rect.top+rect.height/2});
     const reference=makeBlueprint(home,source.level,{x:center.x-source.width/2,y:center.y-source.height/2});if(!reference)return;
     commit(h=>({...h,blueprints:[...(h.blueprints||[]),reference]}));
-    floorClickRef.current=null;drawing.current=null;polygonDraft.current=[];setStroke([]);setPreview(null);setDraftFloor(null);setTool('select');setSelected(null);setSelectedWall(null);setSelection(emptySelection());setSelectedBlueprint(reference.id);
+    drawing.current=null;polygonDraft.current=[];setStroke([]);setPreview(null);setDraftFloor(null);setTool('select');setSelected(null);setSelectedWall(null);setSelection(emptySelection());setSelectedBlueprint(reference.id);
   };
-  const chooseTool=id=>{setSelectedBlueprint(null);floorClickRef.current=null;setTool(id);polygonDraft.current=[];drawing.current=null;setStroke([]);if(id!=='select'){setSelection(emptySelection());setSelected(null);setSelectedWall(null);}};
+  const chooseTool=id=>{setSelectedBlueprint(null);setFloorContext(null);setMeasurementEdit(null);setTool(id);polygonDraft.current=[];drawing.current=null;dragging.current=null;marqueeRef.current=null;setMarquee(null);setPreview(null);setDraggedObjects([]);setStroke([]);if(id!=='select'){setSelection(emptySelection());setSelected(null);setSelectedWall(null);}};
   const toolAction=action=>{
     if(!editable)return;
     if(action==='delete'){removeSelected();return;}
@@ -685,12 +681,12 @@ function App() {
       commit(h=>reorderObjects(h,[...ids,...stairs],action,orderedObjects(activeHome).map(e=>e.object.id)));return;
     }
     if(action==='duplicate'){
-      const added=home.items.filter(i=>ids.includes(i.id)).map(i=>({...i,id:makeId(),x:i.x+30,y:i.y+18,locked:false}));
+      const added=home.items.filter(i=>ids.includes(i.id)).map(i=>({...i,id:makeId(),x:i.x+30,y:i.y+18,level:objectFloorLevel(home,i),locked:false}));
       if(!added.length)return;commit(h=>({...h,items:[...h.items,...added]}));setSelection({...emptySelection(),items:added.map(i=>i.id)});setSelected(added.length===1?added[0].id:null);return;
     }
     commit(h=>transformFurniture(h,ids,action));
   };
-  return <div className={`app ${panelOpen?'drawer-open':''} ${modal==='upload'||editingStickerId?'is-uploading':''}`}>
+  return <div className={`app ${panelOpen?'drawer-open':''} ${modal==='upload'||editingStickerId?'is-uploading':''}`} style={cursorStyles}>
     <div className="game-hud">
       <div className="hud-left">
         <button className="game-menu-trigger" onClick={()=>setMenuOpen(v=>!v)} aria-expanded={menuOpen} aria-label="Game menu"><SketchFrame/><Menu size={24}/><span>Menu</span></button>
@@ -709,20 +705,20 @@ function App() {
         {!floorOverview&&mode!=='explore'&&<Toolbox mode={mode} tool={tool} onChoose={chooseTool} canEdit={editable} hasSelection={groupCount>0||!!selectedItem} locked={selectedItem?.locked} onAction={toolAction} outlineEditMode={outlineEditMode} onOutlineEditMode={setOutlineEditMode} onAddBlueprint={addBlueprint} canAddBlueprint={buildable&&floorLayers.floors.length>0&&(home.blueprints||[]).length<50}/>}
 
         {mode==='build'&&tool!=='select'&&<div className="drawing-hint"><Pencil size={14}/>{({rectangle:'Click and drag to draw your home outline',polygon:'Click each corner. Click the first point to close your outline.',wall:'Click and drag to divide a room',freeform:'Draw freely. We’ll smooth the little wobbles.',boundary:'Draw a closed outline to reshape your home',door:'Click near a wall to add a door',window:'Click near a wall to add a window',eraser:'Click a wall or opening to remove it'})[tool]}</div>}
-        {!floorOverview&&<svg ref={svgRef} className="room-scene" viewBox="0 0 1080 760" role="img" aria-label={mode==='build'?'Top-down floor plan editor':'Your top-down home'} onContextMenu={e=>{e.preventDefault();if(!cameraDrag.current&&performance.now()>suppressContextUntil.current)onFloorContext(e);}} onPointerDownCapture={onCameraDown} onPointerDown={onSceneDown} onPointerMove={onSceneMove} onPointerUp={onSceneUp} onPointerCancel={()=>{cameraDrag.current=null;setPanning(false);dragging.current=null;setDraggedObjects([]);drawing.current=null;floorClickRef.current=null;marqueeRef.current=null;setMarquee(null);setPreview(null);setStroke([]);}} onDragOver={e=>{e.preventDefault();e.dataTransfer.dropEffect='copy';}} onDrop={e=>{e.preventDefault();const type=e.dataTransfer.getData('application/home-made');if(type)addItem(type,pointFromEvent(e));}}>
+        {!floorOverview&&<svg ref={svgRef} className="room-scene" viewBox="0 0 1080 760" role="img" aria-label={mode==='build'?'Top-down floor plan editor':'Your top-down home'} onContextMenu={e=>{e.preventDefault();if(!cameraDrag.current&&performance.now()>suppressContextUntil.current)onFloorContext(e);}} onPointerDownCapture={onCameraDown} onPointerDown={onSceneDown} onPointerMove={onSceneMove} onPointerUp={onSceneUp} onPointerCancel={()=>{cameraDrag.current=null;setPanning(false);dragging.current=null;setDraggedObjects([]);drawing.current=null;marqueeRef.current=null;setMarquee(null);setPreview(null);setStroke([]);}} onDragOver={e=>{e.preventDefault();e.dataTransfer.dropEffect='copy';}} onDrop={e=>{e.preventDefault();const type=e.dataTransfer.getData('application/home-made');if(type)addItem(type,pointFromEvent(e));}}>
           <g ref={groupRef} transform={`translate(${camera.x+540*(1-zoom)} ${camera.y+385*(1-zoom)}) scale(${zoom}) translate(${floorShift.x} ${floorShift.y})`}>
             {mode==='build'?<BuildPlans home={visibleHome} selectedWall={selectedWall} selection={selection} onWallDown={startWallDrag} onBoundaryDown={startBoundaryDrag} onDimensionEdit={buildable?editMeasurement:undefined} showGrid={home.grid} onOpeningDown={(e,o)=>{if(tool!=='select')return;e.stopPropagation();if(e.shiftKey){toggleSelected('openings',o.id);return;}setSelectedWall(null);setSelected(null);setSelection({...emptySelection(),openings:[o.id]});}}/>:<FloorStack home={visibleHome} level={activeLevel} externalObjects showLabels={false} onDoor={o=>{if(mode!=='explore')return;if(!buildable)return notify('The homeowner controls this door.');const ids=new Set(o.doorIds||[o.id]);commit(h=>({...h,openings:h.openings.map(d=>ids.has(d.id)?{...d,open:!d.open}:d)}));}}/>}
-            {mode==='build'&&<CanvasBlueprints home={visibleHome} selected={selectedBlueprint} onPointerDown={startBlueprintDrag}/>}
+            {mode==='build'&&<CanvasBlueprints home={visibleHome} selected={selectedBlueprint} interactive={tool==='select'&&buildable} onPointerDown={startBlueprintDrag}/>}
             {mode==='build'&&tool==='select'&&buildable&&!selectedBlueprint&&<FloorEdgeTargets home={visibleHome} onResize={startFloorEdgeResize}/>}
             <g className="decoration-layer">{sceneObjects.map(({kind,object:item})=>kind==='stair'?<StairObject key={item.id} stair={item} decorated={mode!=='build'} onPointerDown={onStairDown} destinationLevel={floorLayers.floors.find(f=>f.level===item.toLevel&&f.level>activeLevel)?.level||floorLayers.floors.find(f=>f.level>activeLevel)?.level}/>:mode==='build'?<PlanFurniture key={item.id} item={item} home={home} onPointerDown={onItemDown}/>:<g key={item.id} transform={`translate(${item.x} ${item.y}) rotate(${item.rotation||0}) scale(${item.scale||1})`} className={`furniture ${mode==='decorate'?'can-drag':''} ${selection.items.includes(item.id)?'is-selected':''}`} onPointerDown={e=>onItemDown(e,item)} style={{opacity:item.opacity??1}}>
                 <g transform={`scale(${item.flipped?-1:1} 1)`}><TopDownFurniture type={item.type} custom={home.custom.find(c=>c.id===item.type)}/></g>
-                {mode==='decorate'&&selected===item.id&&groupCount<=1&&<FurnitureSelection item={item} onResize={(e,i)=>{if(i.locked)return;e.stopPropagation();setDraggedObjects([i.id]);const p=pointFromEvent(e);dragging.current={id:i.id,resize:true,scale:i.scale,center:{x:i.x,y:i.y},distance:Math.max(1,Math.hypot(p.x-i.x,p.y-i.y))};svgRef.current.setPointerCapture(e.pointerId);}}/>}
+                {tool==='select'&&mode==='decorate'&&selected===item.id&&groupCount<=1&&<FurnitureSelection item={item} onResize={(e,i)=>{if(tool!=='select'||i.locked)return;e.stopPropagation();setDraggedObjects([i.id]);const p=pointFromEvent(e);dragging.current={id:i.id,resize:true,scale:i.scale,center:{x:i.x,y:i.y},distance:Math.max(1,Math.hypot(p.x-i.x,p.y-i.y))};svgRef.current.setPointerCapture(e.pointerId);}}/>}
               </g>)}</g>
             {mode==='explore'&&home.boundary.length>2&&<TopDownCharacter {...position} color={profile?.color} name={profile?.name} sitting={sitting}/>}
             {mode!=='build'&&players.filter(p=>p.id!==profile?.id).map(p=><TopDownCharacter key={p.connectionId} {...p.position} color={p.color} name={p.name}/>)}
             {!!stroke.length&&<g pointerEvents="none">{['rectangle','ellipse'].includes(tool)&&stroke.length>1?<><path d={tool==='ellipse'?ellipsePath(stroke[0],stroke.at(-1)):'M'+rectangleFromPoints(stroke[0],stroke.at(-1)).map(p=>p.x+','+p.y).join(' L')+' Z'} fill="#f9fbef88" stroke="#7c9965" strokeWidth="3" strokeDasharray="7 4"/><Dimension a={rectangleFromPoints(stroke[0],stroke.at(-1))[0]} b={rectangleFromPoints(stroke[0],stroke.at(-1))[1]} live/><Dimension a={rectangleFromPoints(stroke[0],stroke.at(-1))[1]} b={rectangleFromPoints(stroke[0],stroke.at(-1))[2]} live/></>:<><path d={['wall','polygon'].includes(tool)?'M'+stroke.map(p=>p.x+','+p.y).join(' L'):smoothPath(stroke,tool==='boundary')} fill={['polygon','boundary'].includes(tool)?'#c1cda329':'none'} stroke="#7c9965" strokeWidth="3" strokeDasharray="7 4" strokeLinecap="round"/>{tool==='wall'&&stroke.length>1&&<Dimension a={stroke[0]} b={stroke.at(-1)} live/>}{tool==='polygon'&&stroke.map((p,i)=><circle key={i} cx={p.x} cy={p.y} r={i===0?6:3} fill="#f9fbef" stroke="#7c9965" strokeWidth="1.5"/>)}</>}</g>}
             {tool==='select'&&groupBounds&&groupCount>0&&!singleFurnitureSelection&&<g className="group-selection"><rect {...groupBounds} rx="3" fill="none" stroke="#fffdf1" strokeWidth="5" strokeDasharray="6 4" vectorEffect="non-scaling-stroke" pointerEvents="none"/><rect {...groupBounds} rx="3" fill="none" stroke="#5d7e48" strokeWidth="2.2" strokeDasharray="6 4" vectorEffect="non-scaling-stroke" pointerEvents={openingSelectionOnly?'none':'stroke'} onPointerDown={openingSelectionOnly?undefined:e=>startGroupDrag(e)}/>
-              {[[groupBounds.x,groupBounds.y],[groupBounds.x+groupBounds.width,groupBounds.y],[groupBounds.x+groupBounds.width,groupBounds.y+groupBounds.height],[groupBounds.x,groupBounds.y+groupBounds.height]].map(([x,y],i)=><g key={i} className={canResizeOutline?'selection-box-resize-handle':undefined} aria-label={canResizeOutline?`Resize outline width and height ${i+1}`:undefined} pointerEvents={canResizeOutline?'all':'none'} style={canResizeOutline?{cursor:i%2===0?'nwse-resize':'nesw-resize'}:undefined} onPointerDown={canResizeOutline?e=>startOutlineBoxResize(e,i):undefined}>
+              {[[groupBounds.x,groupBounds.y],[groupBounds.x+groupBounds.width,groupBounds.y],[groupBounds.x+groupBounds.width,groupBounds.y+groupBounds.height],[groupBounds.x,groupBounds.y+groupBounds.height]].map(([x,y],i)=><g key={i} className={canResizeOutline?'selection-box-resize-handle':undefined} aria-label={canResizeOutline?`Resize outline width and height ${i+1}`:undefined} pointerEvents={canResizeOutline?'all':'none'} style={canResizeOutline?{cursor:gameCursor(i%2===0?'nwse-resize':'nesw-resize')}:undefined} onPointerDown={canResizeOutline?e=>startOutlineBoxResize(e,i):undefined}>
                 {canResizeOutline&&<rect x={x-10/zoom} y={y-10/zoom} width={20/zoom} height={20/zoom} fill="transparent"/>}
                 <rect x={x-4/zoom} y={y-4/zoom} width={8/zoom} height={8/zoom} rx={1/zoom} fill="#fffdf1" stroke="#5d7e48" strokeWidth="1.6" vectorEffect="non-scaling-stroke" pointerEvents="none"/>
               </g>)}
@@ -785,7 +781,7 @@ function App() {
     {modal==='rename'&&<Modal title="What feels like home?" eyebrow="GIVE YOUR LITTLE PLACE A NAME" onClose={closeModal}><p>A name for your own little corner of the world.</p><form onSubmit={e=>{e.preventDefault();if(formName.trim()){commit(h=>({...h,name:formName.trim().slice(0,80)}));setModal(null);}}}><label className="form-label">Your home’s name<input autoFocus maxLength={80} value={formName} onChange={e=>setFormName(e.target.value)} placeholder="My home"/></label><button className="button primary full-width" disabled={!formName.trim()}><Check size={17}/>That feels like home</button></form></Modal>}
     {modal==='profile'&&<Modal title="Hello, little dreamer." eyebrow="A LITTLE INTRODUCTION" onClose={closeModal}><p>What should your neighbors call you?</p><div className="profile-preview"><svg viewBox="0 0 130 120"><Character x={65} y={109} color={profileColor}/></svg></div><form onSubmit={async e=>{e.preventDefault();setBusy(true);try{await world.updateProfile({name:formName.trim(),color:profileColor});setModal(null);notify('Looking lovely. Make yourself at home.');}catch(err){notify(err.message);}finally{setBusy(false);}}}><label className="form-label">Your display name<input autoFocus required maxLength={24} value={formName} onChange={e=>setFormName(e.target.value)}/></label><label className="form-label">A favorite color</label><div className="profile-colors">{['#a2ad83','#bda080','#a0b6b1','#c29d9b','#b1a2bb','#cfb676'].map(c=><button type="button" key={c} title={`Outfit color ${c}`} aria-label={`Outfit color ${c}`} className={profileColor===c?'active':''} style={{background:c}} onClick={()=>setProfileColor(c)}>{profileColor===c&&<Check size={19}/>}</button>)}</div><button className="button primary full-width" disabled={busy||!formName.trim()}>{busy?<LoaderCircle size={17} className="spin"/>:<Check size={17}/>}That’s a little more me</button></form></Modal>}
     {modal==='invite'&&<Modal title="A little company?" eyebrow="GOOD HOMES HAVE ROOM FOR FRIENDS" onClose={closeModal}><p>Invite someone to slow down, stay a while, and make a little memory.</p>{role==='owner'?<><label className="form-label">Give your friend a little freedom<select value={inviteRole} onChange={e=>{setInviteRole(e.target.value);setInviteLink('');}}><option value="viewer">Visitor — wander & enjoy</option><option value="decorator">Decorator — make it cozy together</option><option value="builder">Builder — dream & build together</option></select></label><button className="button primary full-width" onClick={createInvite} disabled={busy}>{busy?<LoaderCircle size={17} className="spin"/>:<Link size={17}/>}Make an invitation<Copy size={16}/></button>{inviteLink&&<label className="form-label invite-link-label">A link to your little place · valid for 7 days<input readOnly aria-label="Invitation link" value={inviteLink} onFocus={e=>e.target.select()}/></label>}<div className="public-setting"><span><DoorOpen size={21}/><span><strong>Leave the door open</strong><small>Let neighbors visit and look around.</small></span></span><button className={`toggle ${access.public?'on':''}`} role="switch" aria-checked={access.public} aria-label="Allow neighborhood visitors" onClick={()=>updateAccess({public:!access.public})}><span/></button></div>{access.collaborators.length>0&&<div className="collaborators"><h3>People with a little key</h3>{access.collaborators.map(p=><div className="collaborator" key={p.id}><span className="mini-avatar" style={{background:p.color}}>•ᴗ•</span><span>{p.name}</span><select aria-label={`Permission for ${p.name}`} value={p.role} onChange={e=>updateAccess({playerId:p.id,role:e.target.value})}><option value="viewer">Visitor</option><option value="decorator">Decorator</option><option value="builder">Builder</option><option value="remove">Remove access</option></select></div>)}</div>}</>:<div className="visitor-notice"><ShieldCheck size={28}/><h3>You’re a welcome {role==='viewer'?'visitor':role}.</h3><p>Only the homeowner can make invitations and change who has a key.</p></div>}<span className="modal-footnote"><LockKeyhole size={12}/>Your home. Your people. Your choice.</span></Modal>}
-    {modal==='upload'&&<StickerDialog busy={busy} src={removeBg?upload?.processed:upload?.original} name={upload?.name||''} removeBg={removeBg} onRemoveBg={setRemoveBg} onName={name=>setUpload(u=>({...u,name}))} cancel={closeModal} save={saveUpload}/>}
+    {modal==='upload'&&<StickerDialog busy={busy} processing={removeBg&&(cutoutBusy||!!upload&&upload.processedStrength!==cutoutStrength)} strength={cutoutStrength} onStrength={setCutoutStrength} src={removeBg?upload?.processed:upload?.original} name={upload?.name||''} removeBg={removeBg} onRemoveBg={setRemoveBg} onName={name=>setUpload(u=>({...u,name}))} cancel={closeModal} save={saveUpload}/>}
     {editingStickerId&&home.custom.some(s=>s.id===editingStickerId)&&<StickerDialog renaming src={home.custom.find(s=>s.id===editingStickerId).src} name={editingStickerName} onName={setEditingStickerName} cancel={()=>setEditingStickerId(null)} save={saveStickerRename}/>}
     {modal==='help'&&<Modal title="A little guide to feeling at home." eyebrow="THERE’S NO WRONG WAY TO MAKE IT YOURS" wide onClose={closeModal}><div className="help-grid"><div><Hammer/><h3>Dream it. Draw it.</h3><p>Build straight walls or draw freeform curves. Use Home outline for a new floor shape. Select a wall to move it or drag its endpoints.</p></div><div><Armchair/><h3>A few favorite things.</h3><p>Click or drag a piece from the collection. Select it to resize, rotate, flip, layer, or lock it. Your changes save as you go.</p></div><div><DoorOpen/><h3>Settle right in.</h3><p>Switch to Explore. Wander with WASD or arrow keys. Walk up to a chair, your bed, or a little treasure, then press E.</p></div><div><Users/><h3>Better together.</h3><p>Invite a friend with a visitor, decorator, or builder pass. Open the same link on another device to walk and decorate together.</p></div></div><div className="help-note"><ShieldCheck size={19}/><p>Your home is linked to this browser. Keep your browser data to return to it. Use a backup to keep a personal copy.</p></div><button className="button secondary full-width" onClick={exportHome}><Download size={17}/>Keep a backup of my home</button></Modal>}
     {modal==='room'&&<Modal title="Your own cozy corner." eyebrow="A LITTLE PLACE TO JUST BE" onClose={closeModal}><p>{home.description}</p><div className="room-stats"><span><strong>{home.items.length}</strong>favorite things</span><span><strong>{home.walls.length}</strong>little walls</span><span><strong>{players.length}</strong>at home</span></div><p className="room-quote">“A home isn’t simply given to you.<br/>You make it yours.”</p><button className="button secondary full-width" onClick={()=>{setModal(null);openNeighborhood();}}><DoorOpen size={17}/>Meet the neighborhood<ArrowRight size={16}/></button></Modal>}

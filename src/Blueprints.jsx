@@ -8,21 +8,22 @@ import {floorOutlines} from './model.js';
 export function BlueprintIcon(){
   return <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 4h16v16H4z" strokeDasharray="2 3"/><path d="M8 16V8h8v5h-4v3z"/></svg>;
 }
-export function CanvasBlueprints({home,selected,onPointerDown}){
+export function CanvasBlueprints({home,selected,onPointerDown,interactive=true}){
   const prefix=`blueprint-hit-${useId().replace(/:/g,'')}`;
   const path=ring=>'M'+ring.map(p=>`${p.x},${p.y}`).join(' L')+' Z';
   const occupied=floorOutlines(home).map(path).join(' ');
-  return <g className="canvas-blueprints">{(home.blueprints||[]).map((b,index)=>{
+  const canDrag=interactive&&!!onPointerDown;
+  return <g className="canvas-blueprints" pointerEvents={canDrag?'auto':'none'}>{(home.blueprints||[]).map((b,index)=>{
     const {ring,source}=blueprintGeometry(home,b),active=selected===b.id;
     const d=path(ring),clipId=`${prefix}-${index}`;
-    return <g key={b.id} className={`canvas-blueprint ${active?'is-selected':''}`} data-blueprint-id={b.id} aria-label={source?`Level ${source.level} reference blueprint`:'Reference blueprint (source removed)'} style={{cursor:'move'}} onPointerDown={onPointerDown?e=>onPointerDown(e,b):undefined}>
-      <title>Drag the dotted outline or empty space inside it to move this reference.</title>
+    return <g key={b.id} className={`canvas-blueprint ${active?'is-selected':''}`} data-blueprint-id={b.id} aria-label={source?`Level ${source.level} reference blueprint`:'Reference blueprint (source removed)'} onPointerDown={canDrag?e=>onPointerDown(e,b):undefined}>
+      <title>{canDrag?'Drag the dotted outline or empty space inside it to move this reference.':'Reference outline. Draw inside it with the floor tool.'}</title>
       <path d={d} fill="none" stroke={active?'#658653':'#829574'} strokeWidth={active?'2.5':'2'} strokeDasharray="3 6" strokeLinejoin="round" opacity={active?'.9':'.6'} vectorEffect="non-scaling-stroke" pointerEvents="none"/>
       {/* The empty interior is draggable, but a real floor placed over the
           reference keeps receiving clicks. Clip paths also clip hit testing. */}
       <defs><clipPath id={clipId}><path d={`${d} ${occupied}`} clipRule="evenodd"/></clipPath></defs>
-      <path className="blueprint-interior-hit" d={d} fill="transparent" clipPath={`url(#${clipId})`} pointerEvents="fill"/>
-      <path className="blueprint-hit" d={d} fill="none" stroke="transparent" strokeWidth="16" vectorEffect="non-scaling-stroke" pointerEvents="stroke"/>
+      {canDrag&&<><path className="blueprint-interior-hit" d={d} fill="transparent" clipPath={`url(#${clipId})`} pointerEvents="fill"/>
+      <path className="blueprint-hit" d={d} fill="none" stroke="transparent" strokeWidth="16" vectorEffect="non-scaling-stroke" pointerEvents="stroke"/></>}
     </g>;
   })}</g>;
 }

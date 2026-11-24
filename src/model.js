@@ -172,32 +172,35 @@ function segmentCross(a,b,c,d) {
   const t=((c.x-a.x)*sy-(c.y-a.y)*sx)/den,u=((c.x-a.x)*ry-(c.y-a.y)*rx)/den;
   return t>=-1e-7&&t<=1+1e-7&&u>=-1e-7&&u<=1+1e-7?{t:Math.max(0,Math.min(1,t)),u:Math.max(0,Math.min(1,u)),point:lerpPoint(a,b,t)}:null;
 }
-// Extend only beyond the drawn endpoints. A wall already crossed by the
-// stroke cannot pull its end backwards into the previous room.
-export function extendDivider(home,wall){
+// Snap only within a small endpoint neighborhood, in either direction. Passing
+// a divider never sends the endpoint across the remainder of the next room.
+export function extendDivider(home,wall,{indices=null,tolerance=18}={}){
   if(wall.points.length<2)return wall;
   const rings=[...floorOutlines(home),...(home.holes||[])];
   const barriers=[...rings.map(r=>[...r,r[0]]),...home.walls.filter(w=>w.id!==wall.id).map(w=>w.points)];
-  const all=rings.flat();
-  if(!all.length)return wall;
-  const reach=Math.hypot(Math.max(...all.map(p=>p.x))-Math.min(...all.map(p=>p.x)),Math.max(...all.map(p=>p.y))-Math.min(...all.map(p=>p.y)))*2+1;
   const extend=(end,neighbor)=>{
-    if(!pointInHome(end,home)||barriers.some(ps=>ps.some((p,i)=>i>0&&distanceToSegment(end,ps[i-1],p)<.1)))return end;
+    if(barriers.some(ps=>ps.some((p,i)=>i>0&&distanceToSegment(end,ps[i-1],p)<.1)))return end;
     const length=Math.hypot(end.x-neighbor.x,end.y-neighbor.y);
     if(length<.001)return end;
-    const far={x:end.x+(end.x-neighbor.x)/length*reach,y:end.y+(end.y-neighbor.y)/length*reach};
-    let nearest=null;
+    const ux=(end.x-neighbor.x)/length,uy=(end.y-neighbor.y)/length;
+    const backward=Math.min(tolerance,length*.4),start={x:end.x-ux*backward,y:end.y-uy*backward},far={x:end.x+ux*tolerance,y:end.y+uy*tolerance};
+    const hits=[];
     for(const ps of barriers)for(let i=1;i<ps.length;i++){
-      const hit=segmentCross(end,far,ps[i-1],ps[i]);
-      if(hit&&hit.t>1e-7&&(!nearest||hit.t<nearest.t))nearest=hit;
+      const hit=segmentCross(start,far,ps[i-1],ps[i]);
+      if(!hit)continue;
+      const distance=Math.hypot(hit.point.x-end.x,hit.point.y-end.y);
+      if(distance<tolerance&& !hits.some(h=>closePoint(h.point,hit.point)))hits.push({...hit,distance});
     }
-    return nearest?.point||end;
+    hits.sort((a,b)=>a.distance-b.distance);
+    // An endpoint halfway between two nearby walls has no clear target.
+    if(hits.length>1&&hits[0].distance>hits[1].distance*.65)return end;
+    return hits[0]?.point||end;
   };
   const points=wall.points.map(p=>({...p}));
   const firstNeighbor=points.find(p=>!closePoint(p,points[0]));
   const lastNeighbor=[...points].reverse().find(p=>!closePoint(p,points.at(-1)));
-  if(firstNeighbor)points[0]=extend(wall.points[0],firstNeighbor);
-  if(lastNeighbor)points[points.length-1]=extend(wall.points.at(-1),lastNeighbor);
+  if(firstNeighbor&&(!indices||indices.includes(0)))points[0]=extend(wall.points[0],firstNeighbor);
+  if(lastNeighbor&&(!indices||indices.includes(points.length-1)))points[points.length-1]=extend(wall.points.at(-1),lastNeighbor);
   return {...wall,points};
 }
 export function addDivider(home,wall){

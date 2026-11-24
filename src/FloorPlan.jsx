@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { CATALOG, distanceToSegment, floorOutlines, getSections, homeSpawn, planArea, planToWorld, PLAN_UNIT, pointInHome, smoothPath } from './model.js';
-import { outlineEdgeControls, outlineCorners } from './editor.js';
+import { outlineCornerControls, outlineEdgeControls, outlineCorners } from './editor.js';
+import {gameCursor} from './cursors.js';
 import {floorDescriptors} from './floors.js';
 import {LevelLabels} from './LevelLabels.jsx';
 import {StairObject} from './Stairs.jsx';
@@ -77,8 +78,8 @@ export function FloorEdgeTargets({home,onResize}){
         spans=spans.flatMap(([start,end])=>at+half<=start||at-half>=end?[[start,end]]:[[start,Math.max(start,at-half)],[Math.min(end,at+half),end]].filter(([x,y])=>y-x>.001));
       }
       const point=t=>`${a.x+(b.x-a.x)*t},${a.y+(b.y-a.y)*t}`;
-      return <path key={index} className="floor-edge-resize-hit" d={spans.map(([start,end])=>`M${point(start)}L${point(end)}`).join(' ')} fill="none" stroke="transparent" strokeWidth="14" vectorEffect="non-scaling-stroke" pointerEvents="stroke" style={{cursor:edge.cursor}} aria-label={`Resize floor ${control.axis==='x'?'width':'height'}`} onPointerDown={e=>onResize(e,{sectionIds,control,index,level:floor.level})}/>;
-    })}</g>;
+      return <path key={index} className="floor-edge-resize-hit" d={spans.map(([start,end])=>`M${point(start)}L${point(end)}`).join(' ')} fill="none" stroke="transparent" strokeWidth="14" vectorEffect="non-scaling-stroke" pointerEvents="stroke" style={{cursor:gameCursor(edge.cursor)}} aria-label={`Resize floor ${control.axis==='x'?'width':'height'}`} onPointerDown={e=>onResize(e,{sectionIds,control,index,level:floor.level})}/>;
+    })}{outlineCornerControls(floor.ring).map(({point,control,index,cursor})=><path key={`corner-${index}`} className="floor-corner-resize-hit" d={`M${point.x},${point.y}h.01`} fill="none" stroke="transparent" strokeWidth="20" strokeLinecap="round" vectorEffect="non-scaling-stroke" pointerEvents="stroke" style={{cursor:gameCursor(cursor)}} aria-label="Resize whole floor diagonally" onPointerDown={e=>onResize(e,{sectionIds,control,index,level:floor.level})}/>)}</g>;
   })}</g>;
 }
 export function FloorPlan({ home: savedHome, preview, selectedWall, selection, onWallDown, onBoundaryDown, onOpeningDown, onStairDown, onItemDown, onDimensionEdit, showObjects=true,showGrid,hideLevelLabels=false }) {

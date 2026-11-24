@@ -10,6 +10,18 @@ export function floorDescriptors(home){
   }).sort((a,b)=>a.level-b.level);
 }
 export function floorAtPoint(home,point){return floorDescriptors(home).find(f=>ringContains(f.ring,point));}
+// An object's level is identity, not a visibility test against its moving centre.
+// Recover legacy unassigned decorations just outside an edge on the nearest floor.
+export function objectFloorLevel(home,object,floors=floorDescriptors(home)){
+  if(object.level!=null&&floors.some(f=>f.level===object.level))return object.level;
+  const inside=floors.find(f=>ringContains(f.ring,object));if(inside)return inside.level;
+  let nearest=null,distance=Infinity;
+  for(const floor of floors)for(let i=0;i<floor.ring.length;i++){
+    const d=distanceToSegment(object,floor.ring[i],floor.ring[(i+1)%floor.ring.length]);
+    if(d<distance){nearest=floor;distance=d;}
+  }
+  return nearest?.level;
+}
 const polygon=ring=>[ring.map(p=>[p.x,p.y])];
 const polygonArea=ring=>Math.abs(ring.reduce((sum,p,i)=>{const q=ring[(i+1)%ring.length];return sum+p[0]*q[1]-q[0]*p[1];},0))/2;
 function blueprintLinks(home,floors){
@@ -77,11 +89,12 @@ export function previousFloorBlueprint(home,level,draft=null){
 export function floorHome(home,floor){
   if(!floor)return {...home,boundary:[],outlines:[],holes:[],sections:[],walls:[],items:[],openings:[],stairs:[],floorLevels:[]};
   const owns=p=>p.level!=null?p.level===floor.level:ringContains(floor.ring,p);
+  const floors=floorDescriptors(home),ownsObject=p=>objectFloorLevel(home,p,floors)===floor.level;
   return {...home,level:floor.level,boundary:floor.ring,outlines:[floor.ring],floorLevels:[floor.level],
     sections:(home.sections||[]).filter(s=>s.level===floor.level||s.level==null&&s.points.some(p=>ringContains(floor.ring,p))),
     holes:(home.holes||[]).filter(r=>r.some(p=>ringContains(floor.ring,p))),
     walls:home.walls.filter(w=>w.points.some((b,i)=>i>0&&ringContains(floor.ring,{x:(b.x+w.points[i-1].x)/2,y:(b.y+w.points[i-1].y)/2}))),
-    openings:home.openings.filter(owns),items:home.items.filter(owns),stairs:(home.stairs||[]).filter(owns)};
+    openings:home.openings.filter(owns),items:home.items.filter(ownsObject),stairs:(home.stairs||[]).filter(ownsObject)};
 }
 export function stackLayers(home,level){
   const floors=floorDescriptors(home),active=floors.find(f=>f.level===level)||floors[0];

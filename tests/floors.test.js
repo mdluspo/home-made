@@ -38,6 +38,9 @@ test('stack registration aligns floor origins and keeps floor contents isolated'
   assert.deepEqual(upper.items.map(i=>i.id),['sofa-2']);assert.equal(upper.sections.length,1);
   assert.deepEqual(upper.floorLevels,[2]);
   const markup=render(FloorStack,{home,level:2});assert.match(markup,/class="stairwell-rim"/);
+  const activeMarkup=markup.slice(markup.indexOf('class="active-floor"'));
+  assert.ok(activeMarkup.indexOf('class="stair-arrival"')<activeMarkup.indexOf('class="topdown-walls"'),'arrival details belong below upper-floor walls');
+  assert.match(activeMarkup,/class="floor-details" clip-path="url\(/);
 });
 test('blueprint overview only mounts four floors in its current sheet',()=>{
   const markup=render(FloorOverview,{home:complex(20),activeLevel:1});
@@ -83,4 +86,23 @@ test('stairs participate in box selection, move, bounds and deletion without mov
   assert.equal(after.x,before.x+35);assert.equal(after.y,before.y+25);assert.deepEqual(moved.items,home.items);
   assert.equal(deleteSelection(moved,selection).stairs.length,0);
   assert.equal(floorDescriptors(home).length,12);
+});
+
+test('dragging decorations across an exterior wall preserves their original floor',()=>{
+  const home=complex(2),picked={...emptySelection(),items:['sofa-1'],stairs:['stair']};
+  const moved=moveSelection(home,picked,{x:900,y:-400});
+  const floor1=floorHome(moved,floorDescriptors(moved).find(f=>f.level===1));
+  const floor2=floorHome(moved,floorDescriptors(moved).find(f=>f.level===2));
+  assert.equal(moved.items.find(i=>i.id==='sofa-1').level,1);
+  assert.equal(moved.stairs[0].level,1);
+  assert.ok(floor1.items.some(i=>i.id==='sofa-1'));assert.equal(floor1.stairs.length,1);
+  assert.ok(!floor2.items.some(i=>i.id==='sofa-1'));assert.equal(floor2.stairs.length,0);
+  const reloaded=JSON.parse(JSON.stringify(moved));
+  assert.ok(floorHome(reloaded,floorDescriptors(reloaded)[0]).items.some(i=>i.id==='sofa-1'));
+});
+
+test('legacy decorations just outside the outline remain visible on their nearest floor',()=>{
+  const home=complex(2);home.items[0]={...home.items[0],x:95};
+  assert.ok(floorHome(home,floorDescriptors(home)[0]).items.some(i=>i.id==='sofa-1'));
+  assert.ok(!floorHome(home,floorDescriptors(home)[1]).items.some(i=>i.id==='sofa-1'));
 });

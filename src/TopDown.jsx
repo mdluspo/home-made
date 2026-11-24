@@ -4,6 +4,7 @@ import { floorOutlines, furnitureFootprint, furnitureVisualBounds } from './mode
 import {buildRoomWalls,openingOccluders,wallGeometryPath} from './roomWalls.js';
 import {LevelLabels} from './LevelLabels.jsx';
 import {StairObject} from './Stairs.jsx';
+import {gameCursor} from './cursors.js';
 import clipping from 'polygon-clipping';
 
 const pathOf=points=>'M'+points.map(p=>`${p.x},${p.y}`).join(' L');
@@ -131,7 +132,7 @@ function RoomOpening({opening:o,height,onDoor,mask,leafMask,portalClip}){
   </g>;
 }
 
-export function TopDownRoom({home,onDoor,onStairDown,showLabels=true,showStairs=true,floorVoids=[]}){
+export function TopDownRoom({home,onDoor,onStairDown,showLabels=true,showStairs=true,floorVoids=[],children}){
   const maskId=`room-opening-depth-${useId().replace(/:/g,'')}`;
   const mesh=useMemo(()=>buildRoomWalls(home),[home.boundary,home.outlines,home.holes,home.walls,home.openings]);
   // buildRoomWalls already normalizes adjacent windows into one span. Reusing
@@ -142,6 +143,10 @@ export function TopDownRoom({home,onDoor,onStairDown,showLabels=true,showStairs=
   const floor={oak:'#d8b98c',birch:'#e9d5ae',tile:'#bdc9ad',rose:'#c3a092'}[home.floor];
   return <g className="topdown-room" strokeLinecap="round" strokeLinejoin="round">
     <defs>
+      <linearGradient id={`${maskId}-wall-wash`} x1="0" y1="0" x2="0" y2="1"><stop stopColor="#fff9e4" stopOpacity=".3"/><stop offset=".35" stopColor="#fff9e4" stopOpacity="0"/><stop offset="1" stopColor="#526347" stopOpacity=".13"/></linearGradient>
+      <filter id={`${maskId}-wall-contact`} x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2"/></filter>
+      <clipPath id={`${maskId}-floor-shadow`}><path d={outline} clipRule="evenodd"/></clipPath>
+      <clipPath id={`${maskId}-floor-details`}><path d={[...floorOutlines(home),...(home.holes||[])].map(r=>pathOf(r)+' Z').join(' ')} clipRule="evenodd"/></clipPath>
       <pattern id={`${maskId}-floorboards`} width="80" height="28" patternUnits="userSpaceOnUse">
         <rect width="80" height="28" fill={floor}/>
         <path d={home.floor==='tile'?'M0 0H80V28H0ZM40 0v28':'M0 0H80V28H0M40 0v14M0 14h80M16 14v14M62 14v14'} fill="none" stroke="#957b59" strokeWidth=".75" opacity=".42"/>
@@ -154,10 +159,13 @@ export function TopDownRoom({home,onDoor,onStairDown,showLabels=true,showStairs=
       {openings.filter(o=>o.type==='door'&&!sideOpening(o)&&o.height>18).map(o=><clipPath key={`${o.id}-portal`} id={`${maskId}-${openings.indexOf(o)}-portal`} clipPathUnits="userSpaceOnUse"><path className="doorway-leaf-limit" d={openingFace(o,-21,21,0,o.height-8)}/></clipPath>)}
     </defs>
     <path className="topdown-floor" d={outline} fill={`url(#${maskId}-floorboards)`} fillRule="evenodd"/>
+    <g className="wall-contact-shadows" clipPath={`url(#${maskId}-floor-shadow)`} pointerEvents="none"><path d={mesh.edges.filter(e=>e.height>0).map(e=>`M${e.a.x},${e.a.y}L${e.b.x},${e.b.y}`).join(' ')} transform="translate(1 3)" fill="none" stroke="#526347" strokeWidth="8" opacity=".14" filter={`url(#${maskId}-wall-contact)`}/></g>
     {floorVoids.map((ring,i)=><path key={i} className="stairwell-rim" d={pathOf(ring)+' Z'} fill="none" stroke="#879577" strokeWidth="3" pointerEvents="none"/>)}
+    {children&&<g className="floor-details" clipPath={`url(#${maskId}-floor-details)`}>{children}</g>}
     <g className="topdown-walls" pointerEvents="none">
-      <g className="wall-faces" fill={home.wallColor}>
-        {mesh.surfaces.filter(s=>s.kind==='face'&&!s.rimReturn).map((surface,i)=><path key={i} className="wall-face" data-height={surface.height} d={wallGeometryPath(surface.geometry)} fillRule="evenodd"/>)}
+      <g className="wall-faces" fill={home.wallColor} stroke="none">
+        <path className="wall-face" d={wallGeometryPath(mesh.faces)} fillRule="evenodd"/>
+        <path className="wall-face-shading" d={wallGeometryPath(mesh.faces)} fill={`url(#${maskId}-wall-wash)`} fillRule="evenodd"/>
       </g>
       <g className="wall-caps" fill="#f2efdb">
         {mesh.surfaces.filter(s=>s.kind==='cap').map((surface,i)=><path key={i} className="joined-wall-cap" data-height={surface.height} d={wallGeometryPath(surface.geometry)} fillRule="evenodd"/>)}
@@ -313,5 +321,5 @@ export function TopDownCharacter({x,y,color='#9cae80'}){
 
 export function FurnitureSelection({item,onResize}){
   const b=furnitureVisualBounds(item.type),x=b.x-3,y=b.y-3,w=b.width+6,h=b.height+6;
-  return <g stroke="#5d7e48" strokeWidth="2"><rect x={x} y={y} width={w} height={h} stroke="#fffdf1" strokeWidth="5" strokeDasharray="6 4" fill="none" vectorEffect="non-scaling-stroke" pointerEvents="none"/><rect x={x} y={y} width={w} height={h} className="selection-box" strokeDasharray="6 4" fill="none" vectorEffect="non-scaling-stroke"/>{[[x,y],[x+w,y],[x+w,y+h],[x,y+h]].map(([cx,cy],i)=><rect key={i} x={cx-4} y={cy-4} width="8" height="8" fill="#fffdf1" vectorEffect="non-scaling-stroke" className="resize-handle" onPointerDown={e=>onResize(e,item)}/>)}</g>;
+  return <g stroke="#5d7e48" strokeWidth="2"><rect x={x} y={y} width={w} height={h} stroke="#fffdf1" strokeWidth="5" strokeDasharray="6 4" fill="none" vectorEffect="non-scaling-stroke" pointerEvents="none"/><rect x={x} y={y} width={w} height={h} className="selection-box" strokeDasharray="6 4" fill="none" vectorEffect="non-scaling-stroke"/>{[[x,y],[x+w,y],[x+w,y+h],[x,y+h]].map(([cx,cy],i)=><rect key={i} x={cx-4} y={cy-4} width="8" height="8" fill="#fffdf1" vectorEffect="non-scaling-stroke" className="resize-handle" style={{cursor:gameCursor(i%2===0?'nwse-resize':'nesw-resize')}} onPointerDown={e=>onResize(e,item)}/>)}</g>;
 }

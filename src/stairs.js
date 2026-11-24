@@ -84,14 +84,27 @@ export function stairPolygons(stair) {
   return [stairGeometry(stair).footprint.map(p=>({...p}))];
 }
 
+// The object wrapper rotates the plan, not gravity. Express screen-up in the
+// wrapper's local coordinates so every elevation stays vertical after rotation.
+export function projectStairPoint(p,z=0,rotation=0){
+  const r=(Number.isFinite(rotation)?rotation:0)*Math.PI/180;
+  return {x:p.x-Math.sin(r)*z,y:p.y-Math.cos(r)*z};
+}
+export function stairScreenDepth(p,rotation=0){
+  const r=(Number.isFinite(rotation)?rotation:0)*Math.PI/180;
+  return p.x*Math.sin(r)+p.y*Math.cos(r);
+}
+
 export function stairBounds(stair,{decorated=false}={}) {
   const {footprint,steps,rails}=stairGeometry(stair);
   const points=[...footprint];
   if(decorated) {
-    for(const step of steps)for(const p of step.points)points.push(point(p.x,p.y-step.z),point(p.x,p.y-step.z+2));
-    for(const rail of rails)for(const p of rail)points.push(point(p.x,p.y-p.z-12));
+    const rotation=Number.isFinite(stair?.rotation)?stair.rotation:0;
+    for(const step of steps)for(const p of step.points)points.push(projectStairPoint(p,step.z,rotation),projectStairPoint(p,step.z-2,rotation));
+    for(const rail of rails)for(const p of rail)points.push(projectStairPoint(p,p.z+12,rotation));
     // Three blur sigmas plus the ground shadow's (3,6) offset.
-    for(const p of footprint)points.push(point(p.x-6,p.y-3),point(p.x+12,p.y+15));
+    const r=rotation*Math.PI/180,c=Math.cos(r),s=Math.sin(r);
+    for(const p of footprint)for(const x of [-6,12])for(const y of [-3,15])points.push(point(p.x+c*x+s*y,p.y-s*x+c*y));
   }
   const x=Math.min(...points.map(p=>p.x))-2,y=Math.min(...points.map(p=>p.y))-2;
   return {x,y,width:Math.max(...points.map(p=>p.x))+2-x,height:Math.max(...points.map(p=>p.y))+2-y};

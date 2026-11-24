@@ -63,6 +63,10 @@ function frontHalfPlane(box,plane){
 // A projected surface retains its original floor-plan depth. A doorway cuts
 // only the solid at that depth, never a different wall overlapping it on screen.
 function openingCutout(surface,opening){
+  // A window/door in the cutaway front belongs to that low border only. Its
+  // shallow cutout volume may touch a diagonal's base at a corner, but must
+  // never punch a rectangular notch into the adjoining full-height wall.
+  if(opening.height<=18&&surface.height>CUTAWAY_HEIGHT)return [];
   const angle=(opening.angle||0)*Math.PI/180,c=Math.cos(angle),s=Math.sin(angle),d=surface.plane;
   const along=[c+s*d[0],s*d[1],s*d[2]-c*opening.x-s*opening.y];
   const across=[-s+c*d[0],c*d[1],c*d[2]+s*opening.x-c*opening.y];
@@ -100,7 +104,7 @@ export function roomOpenings(home,edges){
     const t=Math.max(edgeClearance,Math.min(1-edgeClearance,rawT));
     let angle=Math.atan2(dy,dx)*180/Math.PI;
     if(Math.cos((angle-(opening.angle||0))*Math.PI/180)<0)angle+=angle>0?-180:180;
-    return {...opening,x:wall.a.x+t*dx,y:wall.a.y+t*dy,angle,height:wall.height,thickness:wall.thickness,wallPosition:t,wallIndex:wall.edgeIndex,wallLength:length,wallA:a,wallB:b};
+    return {...opening,x:wall.a.x+t*dx,y:wall.a.y+t*dy,angle,height:wall.height,thickness:wall.thickness,wallPosition:t,wallIndex:wall.edgeIndex,wallLength:length,wallA:a,wallB:b,renderWallA:wall.a,renderWallB:wall.b};
   });
 }
 
@@ -124,7 +128,8 @@ export function combineNearbyWindows(openings, gap = 18){
     if(match.wallLength){
       const midpoint=(match.windowStart+match.windowEnd)/2;
       const t=Math.max(0,Math.min(1,midpoint/match.wallLength));
-      match.x=match.wallA.x+t*(match.wallB.x-match.wallA.x);match.y=match.wallA.y+t*(match.wallB.y-match.wallA.y);match.wallPosition=t;
+      const a=match.renderWallA||match.wallA,b=match.renderWallB||match.wallB;
+      match.x=a.x+t*(b.x-a.x);match.y=a.y+t*(b.y-a.y);match.wallPosition=t;
     }
   }
   return result;
@@ -236,14 +241,137 @@ export function roomWallEdges(home){
   return valid;
 }
 
-// Wall segments first become one solid footprint at each height. Only the
-// exposed faces of that solid are drawn, so T joints have no internal seams.
-// Each surface also carries its plan depth. Occlusion removes the parts of a
-// low cap that sit behind a taller return, rather than drawing rails through it.
-export function buildRoomWalls(home){
-  const edges=roomWallEdges(home),surfaces=[];
+// A plan stroke can visibly meet a junction even when its endpoint is a few
+// pixels off its neighbour's centreline. Use that same junction in Decorate,
+// favouring an axis-aligned run so a horizontal divider remains horizontal.
+function decorateWallEdges(planEdges){
+  const aligned=planEdges.map(edge=>{
+    if(edge.exterior)return edge;
+    const dx=edge.b.x-edge.a.x,dy=edge.b.y-edge.a.y;
+    if(Math.min(Math.abs(dx),Math.abs(dy))<.005*Math.hypot(dx,dy))return edge;
+    const endpoint=p=>{
+      let best=p,distance=Infinity;
+      for(const other of planEdges){
+        if(other===edge||other.exterior)continue;
+        const ox=other.b.x-other.a.x,oy=other.b.y-other.a.y;
+        if(Math.min(Math.abs(ox),Math.abs(oy))>.005*Math.hypot(ox,oy))continue;
+        for(const q of [other.a,other.b]){
+          const d=Math.hypot(q.x-p.x,q.y-p.y);
+          if(d>=distance||d>Math.min(edge.thickness,other.thickness)/2)continue;
+          const host=planEdges.some(e=>e!==edge&&e!==other&&distanceToSegment(p,e.a,e.b)<.05&&distanceToSegment(q,e.a,e.b)<.05);
+          if(host){best=q;distance=d;}
+        }
+      }
+      return {...best};
+    };
+    return {...edge,a:endpoint(edge.a),b:endpoint(edge.b)};
+  });
+  return aligned.map(edge=>{
+    if(edge.exterior)return edge;
+    const dx=edge.b.x-edge.a.x,dy=edge.b.y-edge.a.y;
+    if(Math.min(Math.abs(dx),Math.abs(dy))<.005*Math.hypot(dx,dy))return edge;
+    const anchor=p=>{
+      const front=aligned.find(e=>e.height===CUTAWAY_HEIGHT&&distanceToSegment(p,e.a,e.b)<.05);
+      if(!front)return {point:p,anchored:false};
+      const upright=aligned.some(e=>e!==edge&&e.height===WALL_HEIGHT&&Math.abs(e.b.x-e.a.x)<=Math.abs(e.b.y-e.a.y)*.005&&distanceToSegment(p,e.a,e.b)<.05);
+      // A free divider ending along the front already uses a flush cutaway
+      // continuation. This rule is for the actual corner shared with a side
+      // wall, where continuing sideways would put it in the neighboring room.
+      if(!upright)return {point:p,anchored:false};
+      // The thin top edge must meet the INSIDE of the low front border, not
+      // a floating point one wall-height above it. Move the whole displayed
+      // run (including its base), then extrude uniformly; do not taper height.
+      return {point:{x:p.x,y:p.y+WALL_HEIGHT-front.thickness/2},anchored:true};
+    };
+    const a=anchor(edge.a),b=anchor(edge.b);
+    return a.anchored||b.anchored?{...edge,a:a.point,b:b.point,cutawayAnchored:true}:edge;
+  });
+}
+
+// Intersect neighboring offset lines at joined endpoints. Square end caps
+// overlap past a diagonal's side and leave little stair-step notches at T/Y
+// junctions. These miters change only the wall thickness, never its centerline.
+function joinedWallStrips(edges){
+  const result=new Map(),junctions=[];
+  for(const edge of edges){
+    if(edge.exterior)continue;
+    const endPoint=(p,q,side)=>{
+      const length=Math.hypot(q.x-p.x,q.y-p.y),ux=(q.x-p.x)/length,uy=(q.y-p.y)/length,half=edge.thickness/2;
+      const offset={x:p.x-uy*half*side,y:p.y+ux*half*side};
+      const neighbors=edges.flatMap(other=>{
+        if(other===edge||other.height!==edge.height||distanceToSegment(p,other.a,other.b)>.05)return [];
+        return [other.a,other.b].flatMap(at=>{
+          const l=Math.hypot(at.x-p.x,at.y-p.y);
+          if(l<.05)return [];
+          const vx=(at.x-p.x)/l,vy=(at.y-p.y)/l;
+          let angle=Math.atan2(ux*vy-uy*vx,ux*vx+uy*vy);
+          if(angle<0)angle+=2*Math.PI;
+          return angle<.0001||angle>2*Math.PI-.0001?[]:[{vx,vy,angle,half:other.thickness/2}];
+        });
+      }).sort((a,b)=>a.angle-b.angle);
+      if(!neighbors.length)return {x:offset.x-ux*half,y:offset.y-uy*half};
+      const other=side>0?neighbors[0]:neighbors[neighbors.length-1],cross=ux*other.vy-uy*other.vx;
+      if(Math.abs(cross)<.0001)return offset;
+      const ox=p.x+other.vy*other.half*side,oy=p.y-other.vx*other.half*side;
+      const t=((ox-offset.x)*other.vy-(oy-offset.y)*other.vx)/cross;
+      const miter={x:offset.x+t*ux,y:offset.y+t*uy};
+      // Acute corners use a bounded bevel rather than a long projecting spike.
+      return Math.hypot(miter.x-p.x,miter.y-p.y)<=4*Math.max(half,other.half)?miter:offset;
+    };
+    const aPlus=endPoint(edge.a,edge.b,1),bPlus=endPoint(edge.b,edge.a,-1),bMinus=endPoint(edge.b,edge.a,1),aMinus=endPoint(edge.a,edge.b,-1);
+    result.set(edge,polygon([aPlus,bPlus,bMinus,aMinus]));
+    // Offset-line intersections trim the runs back from a T/Y junction.
+    // Fill the space between each trimmed end and the shared node as well;
+    // otherwise three correctly mitered strips surround a triangular HOLE,
+    // which the cap outline draws as an arrow/notch in the connected wall.
+    for(const [p,left,right] of [[edge.a,aPlus,aMinus],[edge.b,bPlus,bMinus]]){
+      if(Math.abs((left.x-p.x)*(right.y-p.y)-(left.y-p.y)*(right.x-p.x))>EPS)junctions.push(polygon([p,left,right]));
+    }
+  }
+  return {strips:result,junctions};
+}
+
+// Continue a free divider's drawing into its cutaway join, not its saved plan
+// segment. The continuation is later trimmed against the room's silhouette.
+// A junction with a raised wall already has a return: never slide that corner
+// along the diagonal, which would push it into the neighboring room.
+function cutawayStrips(edges,joined){
+  const result=new Map();
+  for(const edge of edges){
+    if(edge.exterior||edge.cutawayAnchored)continue;
+    for(const [end,other] of [[edge.a,edge.b],[edge.b,edge.a]]){
+      if(edges.some(e=>e!==edge&&e.height===WALL_HEIGHT&&distanceToSegment(end,e.a,e.b)<.05))continue;
+      const front=edges.find(e=>e.height===CUTAWAY_HEIGHT&&distanceToSegment(end,e.a,e.b)<.05);
+      if(!front)continue;
+      const length=Math.hypot(end.x-other.x,end.y-other.y),ux=(end.x-other.x)/length,uy=(end.y-other.y)/length;
+      const nx=front.b.y-front.a.y,ny=front.a.x-front.b.x,outward=ux*nx+uy*ny;
+      if(outward<=EPS||ny<=EPS)continue;
+      // Moving up by WALL_HEIGHT moves the cap away from the front cut plane.
+      // Continue along the SAME straight run far enough to meet that plane.
+      const reach=WALL_HEIGHT*ny/outward+edge.thickness*2;
+      const continued=(result.get(edge)||joined.get(edge)||strip(edge)).map(ring=>ring.map(p=>[...p]));
+      for(const i of end===edge.a?[0,3]:[1,2]){
+        continued[0][i][0]+=ux*reach;continued[0][i][1]+=uy*reach;
+      }
+      result.set(edge,continued);
+    }
+  }
+  return result;
+}
+
+// Uniform extrusion keeps both long edges parallel at every angle. All
+// footprints at a height are united BEFORE projection, so joins have no seams.
+function wallSurfaces(edges,stripsByEdge=new Map(),junctions=[]){
+  const surfaces=[];
+  const joinedDiagonal=(edge,point)=>edges.some(other=>{
+    if(other===edge||other.height!==WALL_HEIGHT||distanceToSegment(point,other.a,other.b)>.05)return false;
+    const dx=edge.b.x-edge.a.x,dy=edge.b.y-edge.a.y,ox=other.b.x-other.a.x,oy=other.b.y-other.a.y;
+    const diagonal=Math.abs(dx*dy)>EPS||Math.abs(ox*oy)>EPS;
+    return diagonal&&Math.abs(dx*oy-dy*ox)/(Math.hypot(dx,dy)*Math.hypot(ox,oy))>.005;
+  });
   for(const height of [WALL_HEIGHT,CUTAWAY_HEIGHT]){
-    const strips=edges.filter(e=>e.height===height).map(strip);
+    const strips=edges.filter(e=>e.height===height).map(e=>stripsByEdge.get(e)||strip(e));
+    if(height===WALL_HEIGHT)strips.push(...junctions);
     if(!strips.length)continue;
     const footprint=clipping.union(...strips);
     const caps=snapped(footprint.map(poly=>poly.map(ring=>ring.map(([x,y])=>[x,y-height]))));
@@ -257,21 +385,81 @@ export function buildRoomWalls(home){
       const slope=(by-ay)/dx;
       // The low front and edge-on wall ends form one visible perimeter strip.
       // Keeping cap outlines across those ends makes a joined wall look cut.
-      const rimReturn=height===CUTAWAY_HEIGHT||edges.some(edge=>{
+      const rimReturn=edges.some(edge=>{
         if(edge.height!==height)return false;
         if(edge.footprint){
           const p=edge.footprint;
-          return [[p[0],p[3]],[p[1],p[2]]].some(([a,b])=>distanceToSegment({x:ax,y:ay},a,b)<.001&&distanceToSegment({x:bx,y:by},a,b)<.001);
+          return [[p[0],p[3],edge.a],[p[1],p[2],edge.b]].some(([a,b,end])=>distanceToSegment({x:ax,y:ay},a,b)<.001&&distanceToSegment({x:bx,y:by},a,b)<.001&&!joinedDiagonal(edge,end));
         }
         const length=Math.hypot(edge.b.x-edge.a.x,edge.b.y-edge.a.y),ux=(edge.b.x-edge.a.x)/length,uy=(edge.b.y-edge.a.y)/length;
         const mx=(ax+bx)/2,my=(ay+by)/2,half=edge.thickness/2,fx=bx-ax,fy=by-ay;
         const along=(mx-edge.a.x)*ux+(my-edge.a.y)*uy,across=(mx-edge.a.x)*uy-(my-edge.a.y)*ux;
         // A strip's exposed end is perpendicular to its wall, at any angle.
-        // Quantized union coordinates need a small tolerance at slanted ends.
-        return Math.abs(fx*ux+fy*uy)<.001&&Math.hypot(fx,fy)<=edge.thickness+.001&&Math.abs(across)<=half+.001&&(Math.abs(along+half)<.001||Math.abs(along-length-half)<.001);
+        const isEnd=Math.abs(fx*ux+fy*uy)<.001&&Math.hypot(fx,fy)<=edge.thickness+.001&&Math.abs(across)<=half+.001&&(Math.abs(along+half)<.001||Math.abs(along-length-half)<.001);
+        // At a diagonal/raised-wall junction this exposed return belongs to
+        // the shared wall FACE, not the outlined cap. Outlining it puts an
+        // upright seam on top of the adjoining diagonal even after unioning.
+        return isEnd&&!joinedDiagonal(edge,along<0?edge.a:edge.b);
       });
       surfaces.push({kind:'face',rimReturn,height,plane:[slope,0,ay-slope*ax],original:snapped([[[[ax,ay],[bx,by],[bx,by-height],[ax,ay-height],[ax,ay]]]])});
     }
+  }
+  return surfaces;
+}
+
+// A vertical divider meeting a diagonal at the cutaway front still needs its
+// visible narrow strip all the way to the bottom border. The diagonal's face
+// must not swallow that strip when the shared wall material is merged.
+function uprightFrontReturns(edges,surfaces){
+  const solid=surfaces.length?clipping.union(...surfaces.map(s=>s.original)):[];
+  const returns=[];
+  for(const edge of edges){
+    if(edge.exterior)continue;
+    const dx=edge.b.x-edge.a.x,dy=edge.b.y-edge.a.y;
+    if(Math.abs(dx)>Math.abs(dy)*.005)continue;
+    const end=dy>0?edge.b:edge.a;
+    if(!edges.some(e=>e.height===CUTAWAY_HEIGHT&&distanceToSegment(end,e.a,e.b)<.05))continue;
+    if(!edges.some(e=>e!==edge&&e.height===WALL_HEIGHT&&distanceToSegment(end,e.planA||e.a,e.planB||e.b)<.05))continue;
+    const half=edge.thickness/2,top=end.y-WALL_HEIGHT-4*half;
+    const band=polygon([{x:end.x-half,y:top},{x:end.x+half,y:top},{x:end.x+half,y:end.y},{x:end.x-half,y:end.y}]);
+    // Restore cap styling only inside the existing solid. This cannot move a
+    // plan endpoint, widen the room, or put a connector through an empty room.
+    const original=snapped(clipping.intersection(band,solid));
+    if(original.length)returns.push({kind:'face',rimReturn:true,uprightReturn:true,height:WALL_HEIGHT,plane:[0,0,end.y],original});
+  }
+  return returns;
+}
+
+export function buildRoomWalls(home){
+  const planEdges=roomWallEdges(home),edges=decorateWallEdges(planEdges),{strips:joined,junctions}=joinedWallStrips(edges),joins=cutawayStrips(edges,joined),physical=wallSurfaces(edges,joined,junctions);
+  const anchored=edges.some(e=>e.cutawayAnchored);
+  let surfaces=physical;
+  if(joins.size||anchored){
+    let floor=floorOutlines(home).map(r=>polygon(r));
+    if(home.holes?.length)floor=clipping.difference(floor,...home.holes.map(polygon));
+    // Keep the original raised back/side outline, plus the actual floor. Only
+    // the new cutaway continuations are affected by this screen-space trim.
+    // This also handles stepped/concave fronts without extending into space.
+    const source=anchored?joinedWallStrips(planEdges):null;
+    const sourceSurfaces=source?wallSurfaces(planEdges,source.strips,source.junctions):physical;
+    const envelope=clipping.union(floor,...sourceSurfaces.map(s=>s.original));
+    surfaces=wallSurfaces(edges,new Map([...joined,...joins]),junctions).flatMap(surface=>{
+      const original=snapped(clipping.intersection(surface.original,envelope));
+      return original.length?[{...surface,original}]:[];
+    });
+  }
+  surfaces.push(...uprightFrontReturns(edges,surfaces));
+  const fronts=edges.filter(e=>e.height===CUTAWAY_HEIGHT).map(strip);
+  if(fronts.length){
+    const border=clipping.union(...fronts);
+    // The low front border owns its entire band. Trim raised walls to its
+    // INSIDE edge, not the outside silhouette: otherwise a diagonal cap cuts
+    // through the border and leaves two slanted lines on its bottom edge.
+    surfaces=surfaces.flatMap(surface=>{
+      if(surface.height===CUTAWAY_HEIGHT)return [surface];
+      const original=snapped(clipping.difference(surface.original,border));
+      return original.length?[{...surface,original}]:[];
+    });
   }
   const openings=combineDoorPairs(combineNearbyWindows(roomOpenings(home,edges),24));
   for(const surface of surfaces){
@@ -285,7 +473,9 @@ export function buildRoomWalls(home){
     let visible=surface.original;
     // Plain faces share a material without internal strokes. Outlined rim
     // pieces need depth clipping before they become one continuous border.
-    if(surface.kind==='face'&&!surface.rimReturn){surface.geometry=visible;continue;}
+    // Upright front returns are the cutaway outline of the vertical divider,
+    // not another recessed face. Keep them visible over the adjoining diagonal.
+    if(surface.uprightReturn||surface.kind==='face'&&!surface.rimReturn){surface.geometry=visible;continue;}
     for(const other of surfaces){
       if(other===surface||surface.kind==='cap'&&other.height<=surface.height||!visible.length||!overlaps(surface.bounds,other.bounds))continue;
       // Rim pieces merge into a single outline. Clipping them against each
@@ -302,7 +492,9 @@ export function buildRoomWalls(home){
   const silhouette=surfaces.length?clipping.union(...surfaces.map(s=>s.original)):[];
   const visible=surfaces.filter(s=>s.geometry.length),rimSurfaces=visible.filter(s=>s.kind==='cap'||s.rimReturn);
   const rim=rimSurfaces.length?snapped(clipping.union(...rimSurfaces.map(s=>s.geometry))):[];
-  return {edges,openings,surfaces:visible,silhouette,rim};
+  const faceSurfaces=visible.filter(s=>s.kind==='face'&&!s.rimReturn);
+  const faces=faceSurfaces.length?snapped(clipping.union(...faceSurfaces.map(s=>s.geometry))):[];
+  return {edges:planEdges,projectedEdges:edges,openings,surfaces:visible,silhouette,rim,faces};
 }
 export function wallGeometryPath(geometry){
   return geometry.flatMap(poly=>poly.map(ring=>'M'+ring.map(([x,y])=>`${x},${y}`).join(' L')+' Z')).join(' ');

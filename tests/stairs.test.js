@@ -4,10 +4,10 @@ import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {build} from 'esbuild';
 import {fileURLToPath} from 'node:url';
-import {STAIR_TYPES,stairBounds,stairPolygons,stairGeometry} from '../src/stairs.js';
+import {STAIR_TYPES,stairBounds,stairPolygons,stairGeometry,projectStairPoint} from '../src/stairs.js';
 
 const bundle=await build({entryPoints:[fileURLToPath(new URL('../src/Stairs.jsx',import.meta.url))],bundle:true,platform:'node',format:'esm',write:false,plugins:[{name:'shared-react',setup(build){build.onResolve({filter:/^react$/},()=>({path:new URL('../node_modules/react/index.js',import.meta.url).href,external:true}));}}]});
-const {StairArt,StairGlyph,StairObject}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0].text).toString('base64'));
+const {StairArt,StairGlyph,StairObject,StairArrival}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0].text).toString('base64'));
 const render=(Component,props)=>renderToStaticMarkup(React.createElement('svg',null,React.createElement(Component,props)));
 const stair=kind=>({id:'test-stair',kind,x:230,y:170,rotation:45,scale:1.7});
 const area=points=>Math.abs(points.reduce((s,p,i)=>{const q=points[(i+1)%points.length];return s+p.x*q.y-q.x*p.y;},0)/2);
@@ -51,21 +51,36 @@ test('local hole rings tile exactly with their treads, including the semicircula
   assert.ok(area(spiral.footprint)<Math.PI*62*62/2,'the center remains open');
 });
 
-test('bounds are local and unscaled, enclosing footprint, raised faces, rails and shadow',()=>{
+test('rotation-aware bounds are local and unscaled, enclosing footprint, faces, rails and shadow',()=>{
   for(const {id} of STAIR_TYPES)for(const decorated of [false,true]) {
     const s=stair(id),b=stairBounds(s,{decorated}),mesh=stairGeometry(s);
-    assert.deepEqual(b,stairBounds({kind:id,x:-1000,y:4000,rotation:-90,scale:20},{decorated}));
+    assert.deepEqual(b,stairBounds({kind:id,x:-1000,y:4000,rotation:s.rotation,scale:20},{decorated}));
     assert.deepEqual(stairPolygons(s),stairPolygons({kind:id}));
     assert.ok(Object.values(b).every(Number.isFinite)&&b.width>0&&b.height>0);
     for(const p of mesh.footprint)assert.ok(within(b,p));
     if(decorated) {
-      for(const t of mesh.steps)for(const p of t.points)for(const z of [t.z,t.z-2])assert.ok(within(b,{x:p.x,y:p.y-z}));
-      for(const rail of mesh.rails)for(const p of rail)assert.ok(within(b,{x:p.x,y:p.y-p.z-12}));
-      for(const p of mesh.footprint)for(const delta of [-7.5,7.5])assert.ok(within(b,{x:p.x+3+delta,y:p.y+6+delta}));
+      for(const t of mesh.steps)for(const p of t.points)for(const z of [t.z,t.z-2])assert.ok(within(b,projectStairPoint(p,z,s.rotation)));
+      for(const rail of mesh.rails)for(const p of rail)assert.ok(within(b,projectStairPoint(p,p.z+12,s.rotation)));
+      const r=s.rotation*Math.PI/180,c=Math.cos(r),sin=Math.sin(r);
+      for(const p of mesh.footprint)for(const dx of [-7.5,7.5])for(const dy of [-7.5,7.5])assert.ok(within(b,{x:p.x+c*(3+dx)+sin*(6+dy),y:p.y-sin*(3+dx)+c*(6+dy)}));
       const markup=render(StairArt,{stair:s,decorated});
       for(const match of markup.matchAll(/ d="([^"]+)"/g))for(const p of positions(match[1]))assert.ok(within(b,p,1e-4),`${id}: rendered path outside bounds`);
     }
   }
+});
+
+test('elevation stays screen-vertical at every stair rotation and bounds enclose it',()=>{
+  for(const rotation of [0,30,45,90,135,180,225,270,315])for(const {id} of STAIR_TYPES){
+    const r=rotation*Math.PI/180,c=Math.cos(r),s=Math.sin(r),bounds=stairBounds({kind:id,rotation},{decorated:true});
+    for(const step of stairGeometry({kind:id}).steps)for(const p of step.points){
+      const q=projectStairPoint(p,step.z,rotation);
+      assert.ok(Math.abs((q.x-p.x)*c-(q.y-p.y)*s)<1e-7,'height must not move sideways on screen');
+      assert.ok(Math.abs((q.x-p.x)*s+(q.y-p.y)*c+step.z)<1e-7,'height must rise by z on screen');
+      assert.ok(within(bounds,q));
+    }
+  }
+  const markup=render(StairObject,{stair:stair('straight'),decorated:true,destinationLevel:2});
+  assert.match(markup,/rotate\(-45\)/,'destination label counter-rotates to stay readable');
 });
 
 test('build art and every toolbar icon contain only unfilled strokes and no direction symbols',()=>{
@@ -126,5 +141,19 @@ test('missing or unknown kinds and invalid placements fall back to finite straig
     assert.deepEqual(stairBounds(s),stairBounds({kind:'straight'}));
     assert.doesNotMatch(render(StairObject,{stair:s}),/NaN|Infinity|scale\(-/);
     assert.match(render(StairObject,{stair:s}),/translate\(0 0\) rotate\(0\) scale\(1\)/);
+  }
+});
+
+test('upper-floor arrivals show a clipped descending flight with a flush landing',()=>{
+  for(const {id} of STAIR_TYPES){
+    const markup=render(StairArrival,{stair:stair(id),fromLevel:1});
+    assert.match(markup,/data-perspective="descending"/);
+    assert.match(markup,/aria-label="Stairs from Level 1"/);
+    assert.match(markup,/<clipPath/);
+    assert.match(markup,/class="stair-arrival-landing"/);
+    const depths=[...markup.matchAll(/data-depth="([^"]+)"/g)].map(m=>Number(m[1]));
+    assert.equal(depths.length,stairGeometry({kind:id}).steps.length);
+    assert.equal(Math.min(...depths),0);assert.ok(Math.max(...depths)>0);
+    assert.doesNotMatch(markup,/<text|NaN|Infinity/);
   }
 });

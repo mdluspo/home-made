@@ -54,8 +54,9 @@ export function FloorStack({home,level,onDoor,onStairDown,externalObjects=false,
       {objects(neighbor)}
     </g>}
     <g className="active-floor" data-level={active.level}>
-      <TopDownRoom home={data} floorVoids={voids} onDoor={onDoor} showStairs={false} showLabels={showLabels}/>
-      {arrivals.map(s=><StairArrival key={s.id} stair={{...s,x:s.x+adjacentOffset.x,y:s.y+adjacentOffset.y}} fromLevel={adjacent.level}/>)}
+      <TopDownRoom home={data} floorVoids={voids} onDoor={onDoor} showStairs={false} showLabels={showLabels}>
+        {arrivals.map(s=><StairArrival key={s.id} stair={{...s,x:s.x+adjacentOffset.x,y:s.y+adjacentOffset.y}} fromLevel={adjacent.level}/>)}
+      </TopDownRoom>
       {!externalObjects&&objects(data,true)}
     </g>
   </g>;

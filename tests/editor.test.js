@@ -59,3 +59,12 @@ test('moving a generated shared divider persists independently of both floor sec
     assert.deepEqual(normalizePlan(saved),saved);
   }
 });
+
+test('stretching a divider endpoint snaps only to a close wall, including a small overshoot',()=>{
+  const home=normalizePlan({...initialHome(),boundary:rectangleFromPoints({x:100,y:100},{x:800,y:600}),walls:[{id:'barrier',points:[{x:600,y:100},{x:600,y:600}]},{id:'free',points:[{x:200,y:300},{x:400,y:300}]}]});
+  for(const [x,expected] of [[590,600],[610,600],[450,450]]){
+    const moved=moveVertex(home,'free',1,{x,y:300});
+    assert.ok(Math.abs(moved.walls.find(w=>w.id==='free').points[1].x-expected)<.001);
+    assert.deepEqual(moved.boundary,home.boundary);
+  }
+});
