@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { initialHome, migrateHome, normalizePlan } from './model.js';
+import {linkFloorBlueprints} from './floors.js';
 import { recordHistory, travelHistory } from './history.js';
 
 export function useWorld(notify) {
@@ -66,7 +67,7 @@ export function useWorld(notify) {
           const msg = JSON.parse(e.data);
           if (msg.type === 'home') {
             const recovering = pending.current || inFlight.current;
-            const received=normalizePlan(migrateHome(msg.state));
+            const received=linkFloorBlueprints(normalizePlan(migrateHome(msg.state)));
             if(joinedHome.current!==msg.homeId||(!recovering&&JSON.stringify(received)!==JSON.stringify(currentHome.current)))updateHistory({past:[],future:[]});
             joinedHome.current=msg.homeId;
             version.current = msg.version; inFlight.current = null;
@@ -125,7 +126,8 @@ export function useWorld(notify) {
     const old = currentHome.current;
     const changed = typeof updater === 'function' ? updater(old) : updater;
     const structural = changed.boundary !== old.boundary || changed.walls !== old.walls || changed.sections !== old.sections || changed.openings !== old.openings;
-    const next = structural ? normalizePlan(changed) : changed;
+    const normalized = structural ? normalizePlan(changed) : changed;
+    const next=structural||changed.blueprints!==old.blueprints?linkFloorBlueprints(normalized):normalized;
     if (JSON.stringify(old) === JSON.stringify(next)) return;
     updateHistory(recordHistory(historyRef.current,old));
     applyHome(next); pending.current = next; setStatus('Saving'); flush();

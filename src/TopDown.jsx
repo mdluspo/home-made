@@ -24,26 +24,57 @@ const openingBand=(o,left,right,z,half)=>{
   const a=openingPoint(o,left,z),b=openingPoint(o,right,z);
   return pathOf([{x:a.x+nx,y:a.y+ny},{x:b.x+nx,y:b.y+ny},{x:b.x-nx,y:b.y-ny},{x:a.x-nx,y:a.y-ny}])+' Z';
 };
+function SideDoorSlab({leaf,length,height,paired}){
+  const angle=(leaf.angle||0)*Math.PI/180,half=1.7;
+  const normal=Math.cos(angle)>=0?half:-half;
+  const face={...leaf,x:leaf.x-Math.sin(angle)*normal,y:leaf.y+Math.cos(angle)*normal};
+  const end={...leaf,...openingPoint(leaf,length*Math.sin(angle)>0?length:0),angle:leaf.angle+90};
+  const knob=openingPoint(face,length*.84,height*.45);
+  // Extrude the panel across its normal: a vertical closed face alone has no
+  // screen width. End grain and the top keep that edge-on slab solid.
+  return <>
+    <path className="side-door-panel" d={openingFace(face,0,length,0,height)} fill="#c4a274" stroke="#827b5a" strokeWidth="1.3"/>
+    {Math.abs(length*Math.cos(angle))>8&&<>
+      <path d={openingFace(face,length*.12,length*.88,7,height-6)} fill="none" stroke="#a78d65" strokeWidth="1"/>
+      <circle cx={knob.x} cy={knob.y} r="1.6" fill="#ecdaa5" stroke="#8e8058" strokeWidth=".7"/>
+    </>}
+    <path className="side-door-edge" d={openingFace(end,-half,half,0,height)} fill="#b39065" stroke="#827b5a" strokeWidth="1.2"/>
+    <path className={paired?'side-door-top double-door-top':'side-door-top'} d={openingBand(leaf,0,length,height,half)} fill="#d8c29a" stroke="#827b5a" strokeWidth="1.2"/>
+  </>;
+}
 function SideDoor({opening:o,onDoor,mask,leafMask}){
-  const h=o.height,half=o.thickness/2,hinge=openingPoint(o,-20);
-  const leaf={...o,...hinge,angle:(o.angle||0)+(o.open?70:0)};
+  const h=Math.max(8,o.height-9),half=o.thickness/2,paired=o.doorSpan>42,span=paired?o.doorSpan/2:20;
+  const leaves=(paired?[-1,1]:[-1]).map((side,i)=>{
+    const hinge=openingPoint(o,side*span),length=paired?-side*span:40;
+    return {side,length,index:i,leaf:{...o,...hinge,angle:(o.angle||0)+(o.open?-side*70:0)}};
+  }).sort((a,b)=>{
+    const depth=({leaf,length})=>(leaf.y+openingPoint(leaf,length).y)/2;
+    return depth(a)-depth(b);
+  });
   const jamb=along=>{
     const across={...o,...openingPoint(o,along),angle:(o.angle||0)+90};
     return <g key={along} className="side-door-jamb"><path d={openingFace(across,-half,half,0,o.height)} fill="#eee9d3" stroke="#748164" strokeWidth="1.3"/><path d={openingBand(o,along-1.5,along+1.5,o.height,half)} fill="#f2efdb" stroke="#748164" strokeWidth="1.3"/></g>;
   };
-  const back=Math.sin((o.angle||0)*Math.PI/180)>0?-22:22;
-  return <g className="topdown-opening topdown-door side-opening" data-wall-height={o.height} data-plan-angle={o.angle||0} onPointerDown={e=>{e.stopPropagation();onDoor?.(o);}}>
+  const back=(Math.sin((o.angle||0)*Math.PI/180)>0?-1:1)*(span+2);
+  const header=<path className="side-door-header" d={openingBand(o,-span-3.5,span+3.5,o.height,half)} fill="#f2efdb" stroke="#748164" strokeWidth="1.3"/>;
+  return <g className={`topdown-opening topdown-door side-opening${paired?' double-door':''}`} data-wall-height={o.height} data-plan-angle={o.angle||0} onPointerDown={e=>{e.stopPropagation();onDoor?.(o);}}>
     <g clipPath={mask} className="side-door-frame">{jamb(back)}</g>
-    <g clipPath={leafMask} className="door-leaf side-door" data-plan-angle={leaf.angle}>
-      {o.open&&<path d={openingFace(leaf,0,40,0,h)} fill="#cdb58b" stroke="#827a5c" strokeWidth="1.3"/>}
-      <path className="side-door-top" d={openingBand(leaf,0,40,h,1.7)} fill="#d8c29a" stroke="#827a5c" strokeWidth="1.2"/>
+    <g clipPath={mask}>
+      <path d={openingBand(o,-span,span,0,half)} fill="#c1ae87" stroke="#938565" strokeWidth="1"/>
+      {!o.open&&header}
     </g>
-    <g clipPath={mask}><path d={openingBand(o,-20,20,0,half)} fill="#c1ae87" stroke="#938565" strokeWidth="1"/></g>
-    <g clipPath={mask} className="side-door-frame">{jamb(-back)}</g>
+    {/* The closed slab shares the jamb's screen projection; keep its narrow
+        edge visible inside the frame rather than painting it out entirely. */}
+    {!o.open&&<g clipPath={mask} className="side-door-frame">{jamb(-back)}</g>}
+    {leaves.map(({side,length,index,leaf})=><g key={side} clipPath={paired?`${leafMask.slice(0,-1)}-${index})`:leafMask} className={`door-leaf side-door${paired?side<0?' double-door-leaf double-door-leaf-left':' double-door-leaf double-door-leaf-right':''}`} data-plan-angle={leaf.angle}>
+      <SideDoorSlab leaf={leaf} length={length} height={h} paired={paired}/>
+    </g>)}
+    {o.open&&<g clipPath={mask} className="side-door-frame">{header}{jamb(-back)}</g>}
   </g>;
 }
 function DoubleDoor({opening:o,onDoor,mask,leafMask}){
   const height=o.height,doorHeight=Math.max(8,height-9),half=(o.doorSpan||84)/2;
+  if(sideOpening(o)&&height>18)return <SideDoor opening={o} onDoor={onDoor} mask={mask} leafMask={leafMask}/>;
   return <g className="topdown-opening topdown-door double-door" data-wall-height={height} onPointerDown={e=>{e.stopPropagation();onDoor?.(o);}}>
     <g clipPath={mask}><path d={openingFace(o,-half,half,0,doorHeight)} fill="none" stroke="#7c8164" strokeWidth="2"/></g>
     {[-1,1].map((side,i)=>{
@@ -100,7 +131,7 @@ function RoomOpening({opening:o,height,onDoor,mask,leafMask,portalClip}){
   </g>;
 }
 
-export function TopDownRoom({home,onDoor,onStairDown,showLabels=true,floorVoids=[]}){
+export function TopDownRoom({home,onDoor,onStairDown,showLabels=true,showStairs=true,floorVoids=[]}){
   const maskId=`room-opening-depth-${useId().replace(/:/g,'')}`;
   const mesh=useMemo(()=>buildRoomWalls(home),[home.boundary,home.outlines,home.holes,home.walls,home.openings]);
   // buildRoomWalls already normalizes adjacent windows into one span. Reusing
@@ -124,7 +155,6 @@ export function TopDownRoom({home,onDoor,onStairDown,showLabels=true,floorVoids=
     </defs>
     <path className="topdown-floor" d={outline} fill={`url(#${maskId}-floorboards)`} fillRule="evenodd"/>
     {floorVoids.map((ring,i)=><path key={i} className="stairwell-rim" d={pathOf(ring)+' Z'} fill="none" stroke="#879577" strokeWidth="3" pointerEvents="none"/>)}
-    {(home.stairs||[]).map(s=><StairObject key={s.id} stair={s} decorated onPointerDown={onStairDown}/>)}
     <g className="topdown-walls" pointerEvents="none">
       <g className="wall-faces" fill={home.wallColor}>
         {mesh.surfaces.filter(s=>s.kind==='face'&&!s.rimReturn).map((surface,i)=><path key={i} className="wall-face" data-height={surface.height} d={wallGeometryPath(surface.geometry)} fillRule="evenodd"/>)}
@@ -136,6 +166,7 @@ export function TopDownRoom({home,onDoor,onStairDown,showLabels=true,floorVoids=
       <path className="wall-silhouette" d={wallGeometryPath(mesh.silhouette)} fill="none" stroke="#748164" strokeWidth="1.6"/>
     </g>
     {[...openings].sort((a,b)=>a.y-b.y).map(o=>{const id=`${maskId}-${openings.indexOf(o)}`;return <g key={o.id} className="depth-sorted-opening" data-plan-depth={o.y}><RoomOpening opening={o} height={o.height} onDoor={onDoor} mask={`url(#${id})`} leafMask={`url(#${id}-leaf)`} portalClip={`url(#${id}-portal)`}/></g>;})}
+    {showStairs&&(home.stairs||[]).map(s=><StairObject key={s.id} stair={s} decorated onPointerDown={onStairDown}/>)}
     {showLabels&&<LevelLabels home={home} raised/>}
   </g>;
 }
@@ -282,5 +313,5 @@ export function TopDownCharacter({x,y,color='#9cae80'}){
 
 export function FurnitureSelection({item,onResize}){
   const b=furnitureVisualBounds(item.type),x=b.x-3,y=b.y-3,w=b.width+6,h=b.height+6;
-  return <g stroke="#6c8755" strokeWidth="1.2"><rect x={x} y={y} width={w} height={h} className="selection-box" strokeDasharray="4 3" fill="none"/>{[[x,y],[x+w,y],[x+w,y+h],[x,y+h]].map(([cx,cy],i)=><rect key={i} x={cx-3} y={cy-3} width="6" height="6" fill="#fff9e8" className="resize-handle" onPointerDown={e=>onResize(e,item)}/>)}</g>;
+  return <g stroke="#5d7e48" strokeWidth="2"><rect x={x} y={y} width={w} height={h} stroke="#fffdf1" strokeWidth="5" strokeDasharray="6 4" fill="none" vectorEffect="non-scaling-stroke" pointerEvents="none"/><rect x={x} y={y} width={w} height={h} className="selection-box" strokeDasharray="6 4" fill="none" vectorEffect="non-scaling-stroke"/>{[[x,y],[x+w,y],[x+w,y+h],[x,y+h]].map(([cx,cy],i)=><rect key={i} x={cx-4} y={cy-4} width="8" height="8" fill="#fffdf1" vectorEffect="non-scaling-stroke" className="resize-handle" onPointerDown={e=>onResize(e,item)}/>)}</g>;
 }

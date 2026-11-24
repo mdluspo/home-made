@@ -159,7 +159,8 @@ export function openingOccluders(mesh,opening,{leaf=false,hingeAlong=-20,leafLen
   let plane;
   if(opening.height<=18)plane=[0,1,0];
   else if(side&&opening.type==='window')plane=[0,1,opening.height];
-  else if(side&&!(leaf&&opening.open))plane=leaf?[0,1,opening.height]:[0,0,opening.y+21];
+  else if(side&&leaf&&!opening.open)plane=[0,0,Math.max(y,y+leafLength*Math.sin(leafAngle))];
+  else if(side&&!(leaf&&opening.open))plane=[0,0,opening.y+Math.max(21,(opening.doorSpan||42)/2)];
   else if(leaf&&Math.abs(Math.cos(leafAngle))<.0001)plane=[0,0,Math.max(y,y+leafLength*Math.sin(leafAngle))];
   else plane=[Math.tan(leafAngle),0,y-Math.tan(leafAngle)*x];
   const pieces=[];

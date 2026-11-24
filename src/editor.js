@@ -1,5 +1,6 @@
-import { distanceToSegment, floorOutlines, furnitureVisualBounds, getSections, normalizePlan, pointInPolygon, snapSection } from './model.js';
+import { CATALOG, distanceToSegment, floorOutlines, furnitureVisualBounds, getSections, normalizePlan, PLAN_UNIT, pointInPolygon, snapSection, withFloorOrigins } from './model.js';
 import {stairBounds} from './stairs.js';
+import {reorderObjects} from './layers.js';
 
 export const emptySelection=()=>({boundary:false,sections:[],walls:[],items:[],openings:[],stairs:[]});
 export const selectionCount=s=>Number(s.boundary)+(s.sections?.length||0)+s.walls.length+s.items.length+s.openings.length+(s.stairs?.length||0);
@@ -7,13 +8,7 @@ export function transformFurniture(home,ids,action){
   const chosen=new Set(home.items.filter(i=>ids.includes(i.id)&&!i.locked).map(i=>i.id));
   if(!chosen.size)return home;
   if(action==='forward'||action==='backward'){
-    const items=[...home.items];
-    if(action==='forward'){
-      for(let i=items.length-2;i>=0;i--)if(chosen.has(items[i].id)&&!chosen.has(items[i+1].id))[items[i],items[i+1]]=[items[i+1],items[i]];
-    }else{
-      for(let i=1;i<items.length;i++)if(chosen.has(items[i].id)&&!chosen.has(items[i-1].id))[items[i],items[i-1]]=[items[i-1],items[i]];
-    }
-    return {...home,items};
+    return reorderObjects(home,[...chosen],action);
   }
   if(!['rotate','rotateBack','flip'].includes(action))return home;
   return {...home,items:home.items.map(i=>{
@@ -60,7 +55,8 @@ export function selectionBounds(home,s,mode='build'){
     for(const [x,y] of [[b.x,b.y],[b.x+b.width,b.y],[b.x+b.width,b.y+b.height],[b.x,b.y+b.height]])points.push({x:stair.x+(x*Math.cos(r)-y*Math.sin(r))*scale,y:stair.y+(x*Math.sin(r)+y*Math.cos(r))*scale});
   }
   for(const i of home.items)if(s.items.includes(i.id)){
-    const b=furnitureVisualBounds(i.type),angle=i.rotation*Math.PI/180;
+    const meta=CATALOG.find(c=>c.type===i.type)||home.custom?.find(c=>c.id===i.type),w=(meta?.w||100)*.5,h=(meta?.h||100)*.35;
+    const b=mode==='build'?{x:-w/2,y:-h/2,width:w,height:h}:furnitureVisualBounds(i.type),angle=(i.rotation||0)*Math.PI/180;
     for(const [x,y] of [[b.x,b.y],[b.x+b.width,b.y],[b.x+b.width,b.y+b.height],[b.x,b.y+b.height]])points.push({x:i.x+(x*Math.cos(angle)-y*Math.sin(angle))*i.scale,y:i.y+(x*Math.sin(angle)+y*Math.cos(angle))*i.scale});
   }
   if(!points.length)return null;
@@ -87,7 +83,12 @@ function detachJoins(home,ids){
     const {joinKey,...wall}=w;return {...wall,source:'manual'};
   })};
 }
+export function setWallThickness(home,id,value){
+  home=detachJoins(home,[id]);
+  return {...home,walls:home.walls.map(w=>w.id===id?{...w,thickness:Math.max(3,Math.min(20,Number(value)||7))}:w)};
+}
 export function moveSelection(home,s,delta){
+  home=withFloorOrigins(home);
 if(s.boundary)return {...home,boundary:home.boundary.map(p=>shifted(p,delta)),sections:getSections(home).map(section=>({...section,points:section.points.map(p=>shifted(p,delta))})),outlines:floorOutlines(home).map(r=>r.map(p=>shifted(p,delta))),holes:(home.holes||[]).map(r=>r.map(p=>shifted(p,delta))),walls:home.walls.map(w=>({...w,points:w.points.map(p=>shifted(p,delta))})),stairs:(home.stairs||[]).map(i=>shifted(i,delta)),items:home.items.map(i=>shifted(i,delta)),openings:home.openings.map(o=>shifted(o,delta))};
   if(s.sections?.length)return transformFloorSections(home,s.sections,p=>shifted(p,delta),true);
   home=detachJoins(home,s.walls);
@@ -101,6 +102,7 @@ if(s.boundary)return {...home,boundary:home.boundary.map(p=>shifted(p,delta)),se
   })};
 }
 export function moveVertex(home,wallId,index,target){
+  home=withFloorOrigins(home);
   const sectionId=wallId.startsWith('section:')?wallId.slice(8):null;
   const original=sectionId?getSections(home).find(s=>s.id===sectionId)?.points[index]:wallId==='boundary'?home.boundary[index]:home.walls.find(w=>w.id===wallId)?.points[index];
   if(!original)return home;
@@ -117,6 +119,7 @@ export function moveVertex(home,wallId,index,target){
 }
 const belongs=(p,section)=>pointInPolygon(p,section.points)||section.points.some((a,i)=>distanceToSegment(p,a,section.points[(i+1)%section.points.length])<.1);
 function transformFloorSections(home,ids,transform,snap=false){
+  home=withFloorOrigins(home);
   const originals=getSections(home),chosen=originals.filter(s=>ids.includes(s.id)),stationary=originals.filter(s=>!ids.includes(s.id));
   const transformed=chosen.map(s=>{const next={...s,points:s.points.map(transform)};return snap?snapSection(next,stationary):next;});
   // Keep the source shape intact. Union rendering hides overlaps, while the
@@ -135,6 +138,18 @@ export function outlineBounds(boundary){
 export function outlineCorners(boundary){
   const b=outlineBounds(boundary);if(!b)return [];
   return [{x:b.x,y:b.y},{x:b.x+b.width,y:b.y},{x:b.x+b.width,y:b.y+b.height},{x:b.x,y:b.y+b.height}];
+}
+export function outlineEdgeControls(points){
+  const b=outlineBounds(points);if(!b)return [];
+  const cx=b.x+b.width/2,cy=b.y+b.height/2;
+  return points.flatMap((a,index)=>{
+    const end=points[(index+1)%points.length],dx=end.x-a.x,dy=end.y-a.y;
+    if(Math.hypot(dx,dy)<.1)return [];
+    const axis=Math.abs(dx)>=Math.abs(dy)?'y':'x';
+    const positive=axis==='x'?(a.x+end.x)/2>=cx:(a.y+end.y)/2>=cy;
+    const control=axis==='x'?{x:positive?b.x+b.width:b.x,y:cy,anchor:{x:positive?b.x:b.x+b.width,y:cy},axis}:{x:cx,y:positive?b.y+b.height:b.y,anchor:{x:cx,y:positive?b.y:b.y+b.height},axis};
+    return [{a,b:end,index,control,cursor:axis==='x'?'ew-resize':'ns-resize'}];
+  });
 }
 export function isRoundOutline(home){
   if(home.outlineType==='ellipse')return true;
@@ -157,6 +172,7 @@ function contourIndices(points){
 // own vertices, rather than corners of an empty enclosing rectangle.
 export function outlineControls(points,type='custom',mode='resize'){
   const b=outlineBounds(points);if(!b)return [];
+  if(mode==='points')return contourIndices(points).map(index=>({...points[index],index,kind:'vertex',cursor:'crosshair'}));
   const cx=b.x+b.width/2,cy=b.y+b.height/2;
   const round=type==='ellipse'||(!['polygon','freeform','boundary','rectangle'].includes(type)&&isRoundOutline({boundary:points}));
   if(round)return [
@@ -172,17 +188,60 @@ export function outlineControls(points,type='custom',mode='resize'){
 }
 // Ordinary resizing changes width and height independently. Shift or the
 // explicit proportional mode keeps the original aspect ratio.
-export function resizeOutline(home,corner,target,{proportional=false,sectionId=null,control=null}={}){
-  const section=sectionId?getSections(home).find(s=>s.id===sectionId):null;
-  const corners=outlineCorners(section?.points||home.boundary);if(corners.length!==4)return home;
-  const anchor=control?.anchor||corners[(corner+2)%4],handle=control||corners[corner],b=outlineBounds(section?.points||home.boundary);
+export function resizeOutline(home,corner,target,{proportional=false,sectionId=null,sectionIds=null,control=null}={}){
+  home=withFloorOrigins(home);
+  const ids=sectionIds||(sectionId?[sectionId]:null);
+  const points=ids?getSections(home).filter(s=>ids.includes(s.id)).flatMap(s=>s.points):home.boundary;
+  const corners=outlineCorners(points);if(corners.length!==4)return home;
+  const anchor=control?.anchor||corners[(corner+2)%4],handle=control||corners[corner],b=outlineBounds(points);
   const dx=handle.x-anchor.x,dy=handle.y-anchor.y;
   let sx=control?.axis==='y'||Math.abs(dx)<.001?1:(target.x-anchor.x)/dx,sy=control?.axis==='x'||Math.abs(dy)<.001?1:(target.y-anchor.y)/dy;
   if(proportional){const scale=Math.abs(sx-1)>=Math.abs(sy-1)?sx:sy;const safe=Math.max(20/Math.min(b.width,b.height),scale);sx=safe;sy=safe;}
   else{sx=Math.max(20/b.width,sx);sy=Math.max(20/b.height,sy);}
   const transform=p=>({...p,x:anchor.x+(p.x-anchor.x)*sx,y:anchor.y+(p.y-anchor.y)*sy});
-  if(sectionId)return transformFloorSections(home,[sectionId],transform);
+  if(ids)return transformFloorSections(home,ids,transform);
   return {...home,boundary:home.boundary.map(transform),sections:getSections(home).map(s=>({...s,points:s.points.map(transform)})),outlines:floorOutlines(home).map(r=>r.map(transform)),holes:(home.holes||[]).map(r=>r.map(transform)),walls:home.walls.map(w=>({...w,points:w.points.map(transform)})),stairs:(home.stairs||[]).map(transform),items:home.items.map(transform),openings:home.openings.map(o=>({...transform(o),angle:Math.atan2(Math.sin((o.angle||0)*Math.PI/180)*sy,Math.cos((o.angle||0)*Math.PI/180)*sx)*180/Math.PI}))};
+}
+
+// Exact lengths use the same geometry as dragging. Horizontal/vertical edges
+// change one axis; a diagonal scales proportionally so its angles stay intact.
+export function setPlanMeasurement(home,measurement,metres){
+  const original=home,fail=error=>({home:original,error});
+  if(!Number.isFinite(metres)||metres<=0)return fail('Enter a positive measurement in metres.');
+  const {a,b}=measurement,length=Math.hypot(b.x-a.x,b.y-a.y),target=metres*PLAN_UNIT;
+  if(!Number.isFinite(target)||target>=20000)return fail('That measurement is too large for the drawing area.');
+  if(length<.01)return fail('This edge is too short to resize.');
+  if(Math.abs(target-length)<.00001)return {home,error:null};
+  const ratio=target/length,dx=b.x-a.x,dy=b.y-a.y;
+  const sx=Math.abs(dx)<.001?1:ratio,sy=Math.abs(dy)<.001?1:ratio;
+  const transform=p=>({...p,x:a.x+(p.x-a.x)*sx,y:a.y+(p.y-a.y)*sy});
+  let next;
+  if(measurement.kind==='wall'){
+    home=detachJoins(home,[measurement.wallId]);
+    const wall=home.walls.find(w=>w.id===measurement.wallId);
+    if(!wall||!same(wall.points[0],a)||!same(wall.points.at(-1),b))return fail('The wall changed. Click its measurement again.');
+    const points=wall.points.map(transform);
+    if(points.some(p=>!Number.isFinite(p.x)||!Number.isFinite(p.y)||Math.abs(p.x)>=10000||Math.abs(p.y)>=10000))return fail('That size is outside the drawing area.');
+    const replace=p=>{const index=wall.points.findIndex(q=>same(p,q));return index<0?p:{...points[index]};};
+    const onWall=p=>wall.points.some((q,i)=>i>0&&distanceToSegment(p,wall.points[i-1],q)<1);
+    next=normalizePlan({...home,walls:home.walls.map(w=>({...w,points:w.id===wall.id?points:w.points.map(replace)})),openings:home.openings.map(o=>onWall(o)?transform(o):o)});
+    const edited=next.walls.find(w=>w.id===wall.id);
+    if(!edited||Math.abs(Math.hypot(edited.points.at(-1).x-edited.points[0].x,edited.points.at(-1).y-edited.points[0].y)-target)>.1)return fail('That length does not fit inside this floor plan.');
+  }else{
+    const ids=measurement.sectionIds||[],sections=getSections(home).filter(s=>ids.includes(s.id));
+    if(!sections.length||sections.length!==ids.length)return fail('The floor changed. Click its measurement again.');
+    const currentRings=[...floorOutlines(home),...(home.holes||[])];
+    const currentEdge=currentRings.some(r=>r.some((p,i)=>same(p,a)&&same(r[(i+1)%r.length],b)||same(p,b)&&same(r[(i+1)%r.length],a)));
+    // Ellipse dimensions measure its bounding box, rather than short chords.
+    const bounds=outlineBounds(sections.flatMap(s=>s.points)),corners=outlineCorners(sections.flatMap(s=>s.points));
+    const boxEdge=corners.some((p,i)=>same(p,a)&&same(corners[(i+1)%4],b)||same(p,b)&&same(corners[(i+1)%4],a));
+    if(!currentEdge&&!boxEdge)return fail('The outline changed. Click its measurement again.');
+    if(bounds.width*sx<20||bounds.height*sy<20)return fail('Floor width and height must be at least 0.40 m.');
+    if(sections.some(s=>s.points.map(transform).some(p=>Math.abs(p.x)>=10000||Math.abs(p.y)>=10000)))return fail('That size is outside the drawing area.');
+    next=transformFloorSections(home,ids,transform);
+    if(getSections(home).some(s=>next.sections.find(n=>n.id===s.id)?.level!==s.level))return fail('That size would overlap another floor plan. Move the plans farther apart first.');
+  }
+  return {home:next,error:null};
 }
 export function deleteSelection(home,s){
   const sections=getSections(home).filter(section=>!s.boundary&&!s.sections?.includes(section.id));

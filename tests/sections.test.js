@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { addFloorSection, initialHome, normalizePlan, planArea, pointInHome, rectangleFromPoints } from '../src/model.js';
-import { deleteSelection, emptySelection, moveSelection, outlineBounds, outlineControls, outlineCorners, resizeOutline } from '../src/editor.js';
+import { addFloorSection, initialHome, nextFloorLevel, normalizePlan, planArea, pointInHome, rectangleFromPoints } from '../src/model.js';
+import { deleteSelection, emptySelection, moveSelection, moveVertex, outlineBounds, outlineControls, outlineCorners, outlineEdgeControls, resizeOutline } from '../src/editor.js';
 
 const rect=(x,y,w,h)=>rectangleFromPoints({x,y},{x:x+w,y:y+h});
 const base=()=>normalizePlan(addFloorSection(initialHome(),rect(100,150,200,200),'rectangle'));
@@ -17,6 +17,26 @@ test('floor numbers follow persistent creation identity, not polygon area or pos
   assert.equal(home.sections.at(-1).level,8);
   assert.equal(home.floorLevels[0],8,'the largest polygon renders first, but is still Level 8');
   assert.deepEqual(normalizePlan(JSON.parse(JSON.stringify(home))),home,'saved identities survive reload and repeated normalization');
+});
+
+test('legacy skipped floor numbers are repaired once, including stairs and registration keys',()=>{
+  const legacy={...initialHome(),floorNumberingVersion:undefined,nextLevel:99,sections:[{id:'base',level:1,points:rect(100,100,200,200)},{id:'middle',level:3,points:rect(800,100,200,200)},{id:'top',level:7,points:rect(1500,100,200,200)}],floorOrigins:{1:{x:100,y:100},3:{x:800,y:100},7:{x:1500,y:100}},floorOffsets:{7:{x:20,y:30}},stairs:[{id:'stair',kind:'straight',x:900,y:200,toLevel:7,level:3}]};
+  const repaired=normalizePlan(legacy);
+  assert.deepEqual(repaired.sections.map(s=>s.level),[1,2,3]);
+  assert.deepEqual(repaired.sections.map(s=>s.points),legacy.sections.map(s=>s.points));
+  assert.deepEqual(repaired.floorOrigins[3],{x:1500,y:100});assert.deepEqual(repaired.floorOffsets[3],{x:20,y:30});
+  assert.equal(repaired.stairs[0].toLevel,3);assert.equal(repaired.stairs[0].level,2);assert.equal(nextFloorLevel(repaired),4);
+  assert.deepEqual(normalizePlan(repaired),repaired);
+});
+
+test('corner-touching plans keep separate owners and do not consume levels during repeated edits',()=>{
+  let home=normalizePlan({...initialHome(),nextLevel:80,sections:[{id:'first',level:1,points:rect(100,100,200,200)},{id:'second',level:2,points:rect(300,300,200,200)}]});
+  for(let i=0;i<5;i++){
+    home=normalizePlan(home);
+    assert.deepEqual(home.sections.map(s=>s.level),[1,2]);
+    assert.deepEqual([...home.floorLevels].sort((a,b)=>a-b),[1,2]);
+    assert.equal(home.nextLevel,3);assert.equal(nextFloorLevel(home),3);
+  }
 });
 
 test('joining two floors retains the base number and does not renumber unrelated floors',()=>{
@@ -163,4 +183,42 @@ test('freehand controls stay on the actual contour with a manageable number of h
   assert.ok(outlineControls(points,'freeform','points').every(p=>p.kind==='vertex'));
   const almostRound=Array.from({length:64},(_,i)=>({x:400+100*Math.cos(i/64*Math.PI*2),y:350+100*Math.sin(i/64*Math.PI*2)}));
   assert.ok(outlineControls(almostRound,'freeform').length>4,'hand-drawn contours must not be silently treated as ellipse primitives');
+});
+
+test('point editing exposes real vertices on rectangles, polygons and ellipses',()=>{
+  const ellipse=Array.from({length:64},(_,i)=>({x:400+100*Math.cos(i/64*Math.PI*2),y:350+100*Math.sin(i/64*Math.PI*2)}));
+  for(const [type,points] of [['rectangle',rect(100,150,200,200)],['polygon',[{x:100,y:100},{x:300,y:130},{x:260,y:350},{x:120,y:300}]],['ellipse',ellipse]]){
+    const home=add(initialHome(),points,type),id=home.sections[0].id,controls=outlineControls(points,type,'points');
+    assert.ok(controls.length>=4);
+    assert.ok(controls.every(p=>p.kind==='vertex'));
+    for(const control of controls)assert.deepEqual({x:control.x,y:control.y},points[control.index]);
+    const control=controls[0],target={x:control.x-40,y:control.y-30};
+    const moved=moveVertex(home,`section:${id}`,control.index,target).sections.find(s=>s.id===id).points;
+    assert.deepEqual(moved[control.index],target);
+    points.forEach((p,i)=>{if(i!==control.index)assert.deepEqual(moved[i],p);});
+  }
+});
+
+test('selection-box resizing scales selected sections together without morphing their contours',()=>{
+  const home=add(base(),rect(300,150,100,200)),ids=home.sections.map(s=>s.id);
+  const result=resizeOutline(home,0,{x:0,y:100},{sectionIds:ids});
+  const before=outlineBounds(home.sections.flatMap(s=>s.points)),after=outlineBounds(result.sections.flatMap(s=>s.points));
+  assert.deepEqual(after,{x:0,y:100,width:400,height:250});
+  for(const section of home.sections){
+    const points=result.sections.find(s=>s.id===section.id).points;
+    section.points.forEach((p,i)=>{
+      assert.ok(Math.abs(points[i].x-(400+(p.x-400)*after.width/before.width))<.001);
+      assert.ok(Math.abs(points[i].y-(350+(p.y-350)*after.height/before.height))<.001);
+    });
+  }
+});
+
+test('floor sides use axis resize cursors and resize without morphing vertices',()=>{
+  const home=base(),section=home.sections[0],edges=outlineEdgeControls(section.points);
+  assert.deepEqual(edges.map(e=>e.cursor),['ns-resize','ew-resize','ns-resize','ew-resize']);
+  const right=edges[1],wider=resizeOutline(home,right.index,{x:right.control.x+80,y:right.control.y},{sectionId:section.id,control:right.control});
+  assert.deepEqual(outlineBounds(wider.sections[0].points),{x:100,y:150,width:280,height:200});
+  assert.equal(new Set(wider.sections[0].points.map(p=>p.x)).size,2);
+  const top=edges[0],taller=resizeOutline(home,top.index,{x:top.control.x,y:top.control.y-60},{sectionId:section.id,control:top.control});
+  assert.deepEqual(outlineBounds(taller.sections[0].points),{x:100,y:90,width:200,height:260});
 });

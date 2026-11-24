@@ -44,7 +44,8 @@ export function StairArt({stair,decorated=false}) {
 }
 
 /** Bold, unfilled 24px toolbar glyph, using the same footprint as the object. */
-export function StairGlyph({kind='straight'}) {
+export function StairGlyph({kind='straight',sideways=false}) {
+  if(sideways)return <svg className="stair-glyph stair-glyph-sideways" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 20v-5h5v-5h5V5h7v15Z"/></svg>;
   const mesh=stairGeometry({kind}),b=stairBounds({kind}),s=18/Math.max(b.width,b.height);
   const tx=12-(b.x+b.width/2)*s,ty=12-(b.y+b.height/2)*s;
   return <svg className="stair-glyph" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -56,13 +57,18 @@ export function StairGlyph({kind='straight'}) {
 }
 
 /** Pointer callbacks receive (event, stair), matching furniture interactions. */
-export function StairObject({stair,decorated=false,onPointerDown,selected=false,onResize}) {
+export function StairObject({stair,decorated=false,onPointerDown,selected=false,onResize,destinationLevel}) {
   const b=stairBounds(stair,{decorated}),mesh=stairGeometry(stair);
   const scale=Number.isFinite(stair?.scale)&&stair.scale>0?stair.scale:1;
-  return <g className={`stair-object${selected?' selected':''}`} data-stair-id={stair?.id} transform={`translate(${finite(stair?.x,0)} ${finite(stair?.y,0)}) rotate(${finite(stair?.rotation,0)}) scale(${scale})`} onPointerDown={e=>{e.stopPropagation();onPointerDown?.(e,stair);}}>
+  const landing=mesh.steps.at(-1),top=landing?.points.reduce((a,p)=>({x:a.x+p.x/landing.points.length,y:a.y+p.y/landing.points.length}),{x:0,y:0});
+  return <g className={`stair-object${selected?' selected':''}`} data-stair-id={stair?.id} transform={`translate(${finite(stair?.x,0)} ${finite(stair?.y,0)}) rotate(${finite(stair?.rotation,0)}) scale(${scale})`} onPointerDown={e=>onPointerDown?.(e,stair)}>
     <path className="stair-hit-area" d={path(mesh.footprint)} fill="transparent" stroke="none" pointerEvents="all"/>
     {decorated&&<rect className="stair-raised-hit-area" {...b} fill="transparent" stroke="none" pointerEvents="all"/>}
     <StairArt stair={stair} decorated={decorated}/>
+    {decorated&&destinationLevel&&landing&&<g className="stair-destination" pointerEvents="none">
+      <path d={path(landing.points.map(p=>raised(p,landing.z)))} fill="#f3e6c9" fillOpacity=".35" stroke="#6f805d" strokeWidth="1.5"/>
+      <text x={top.x} y={top.y-landing.z-17} textAnchor="middle" fontSize="9" fill="#526b41" paintOrder="stroke" stroke="#f8f5e5" strokeWidth="3" strokeLinejoin="round">To Level {destinationLevel}</text>
+    </g>}
     {selected&&<g className="stair-selection" fill="none" stroke={GREEN} strokeWidth="1.2">
       <rect {...b} fill="none" strokeDasharray="4 3" pointerEvents="none"/>
       {onResize&&[[b.x,b.y],[b.x+b.width,b.y],[b.x+b.width,b.y+b.height],[b.x,b.y+b.height]].map(([x,y],i)=><g key={i} className="stair-resize-handle" onPointerDown={e=>{e.stopPropagation();onResize(e,stair);}} style={{cursor:'nwse-resize'}}>
@@ -70,5 +76,17 @@ export function StairObject({stair,decorated=false,onPointerDown,selected=false,
         <rect x={x-3} y={y-3} width="6" height="6" fill="none" pointerEvents="none"/>
       </g>)}
     </g>}
+  </g>;
+}
+
+// The upper floor keeps a small landing at floor height while the stairwell
+// remains open to the dimmed flight below. Use the same terminal tread mesh.
+export function StairArrival({stair,fromLevel}){
+  const step=stairGeometry(stair).steps.at(-1);if(!step)return null;
+  const center=step.points.reduce((a,p)=>({x:a.x+p.x/step.points.length,y:a.y+p.y/step.points.length}),{x:0,y:0});
+  return <g className="stair-arrival" transform={`translate(${stair.x} ${stair.y}) rotate(${stair.rotation||0}) scale(${stair.scale||1})`} pointerEvents="none">
+    <path d={path(step.points)} fill="#e5cfaa" stroke="#788569" strokeWidth="1.6"/>
+    <path d={path(step.points.map(p=>({x:p.x,y:p.y+4})))} fill="none" stroke="#a68d67" strokeWidth="1"/>
+    <text x={center.x} y={center.y-14} textAnchor="middle" fontSize="9" fill="#526b41" paintOrder="stroke" stroke="#f8f5e5" strokeWidth="3">From Level {fromLevel}</text>
   </g>;
 }

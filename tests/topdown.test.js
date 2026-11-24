@@ -15,10 +15,11 @@ test('decorate retains both paired door leaves and swings them oppositely withou
     const r=angle*Math.PI/180;
     const home=normalizePlan({...initialHome(),boundary:rectangleFromPoints({x:100,y:100},{x:700,y:600}),walls:[{id:'wall',points:[{x:400-200*Math.cos(r),y:300-200*Math.sin(r)},{x:400+200*Math.cos(r),y:300+200*Math.sin(r)}]}],openings:[-1,1].map((side,i)=>({id:`leaf-${i}`,type:'door',x:400+side*21*Math.cos(r),y:300+side*21*Math.sin(r),angle,open:false}))});
     const closed=render(TopDownRoom,{home});
-    assert.match(closed,/class="topdown-opening topdown-door double-door"/);
-    assert.equal((closed.match(/class="door-leaf double-door-leaf"/g)||[]).length,2);
+    assert.match(closed,/class="topdown-opening topdown-door [^"]*double-door/);
+    assert.equal((closed.match(angle===90?/class="door-leaf side-door double-door-leaf /g:/class="door-leaf double-door-leaf"/g)||[]).length,2);
     const open=render(TopDownRoom,{home:{...home,openings:home.openings.map(o=>({...o,open:true}))}});
-    const angles=[...open.matchAll(/class="double-door-leaf-(?:left|right)"[^>]*data-plan-angle="([^"]+)"/g)].map(m=>Number(m[1]));
+    const angles=[...open.matchAll(/class="[^"]*double-door-leaf-(?:left|right)"[^>]*data-plan-angle="([^"]+)"/g)].map(m=>Number(m[1]));
+    angles.sort((a,b)=>b-a);
     assert.equal(angles.length,2);
     assert.ok(Math.abs(angles[0]-angle-70)<.001);assert.ok(Math.abs(angles[1]-angle+70)<.001);
     assert.doesNotMatch(open,/transform="rotate\(|NaN|Infinity/);
@@ -82,7 +83,7 @@ test('a centered side door and window stay centered along the visible wall cap',
     const points=[...d.matchAll(/(-?[\d.e+-]+),(-?[\d.e+-]+)/g)].map(m=>({x:Number(m[1]),y:Number(m[2])}));
     assert.equal(points.length,4);
     assert.ok(Math.abs(points.reduce((sum,p)=>sum+p.x,0)/4-700)<.001);
-    assert.ok(Math.abs(points.reduce((sum,p)=>sum+p.y,0)/4-255)<.001,'the opening uses the same elevation as its wall, preserving its plan position');
+    assert.ok(Math.abs(points.reduce((sum,p)=>sum+p.y,0)/4-(type==='door'?264:255))<.001,'the panel sits below the header while the window stays at cap height');
   }
 });
 test('the back is raised while the front remains an open floor-level border',()=>{

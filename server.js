@@ -4,6 +4,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { randomUUID, randomBytes } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import { initialHome, validateHome, canMove, migrateHome, homeSpawn, normalizePlan } from './src/model.js';
+import {linkFloorBlueprints} from './src/floors.js';
 
 const app = express();
 const server = createServer(app);
@@ -25,7 +26,7 @@ function persist() {
 }
 const token = () => randomBytes(24).toString('hex');
 for (const home of Object.values(db.homes)) {
-  const state=normalizePlan(migrateHome(home.state));
+  const state=linkFloorBlueprints(normalizePlan(migrateHome(home.state)));
   if(JSON.stringify(state)!==JSON.stringify(home.state)){home.state=state;home.version++;persist();}
 }
 const safeProfile = p => ({ id: p.id, name: p.name, color: p.color, homeId: p.homeId, lotIndex:Object.keys(db.homes).indexOf(p.homeId) });
@@ -147,9 +148,9 @@ wss.on('connection', (ws, req) => {
         if (msg.version !== home.version) return send(ws, 'conflict', { state: home.state, version: home.version });
         if (!validateHome(msg.state)) return send(ws, 'error', { message: 'That change could not be saved. Try a smaller image or fewer objects.' });
         if (ws.role === 'decorator') {
-          for (const key of ['boundary', 'sections', 'removedJoins', 'walls', 'openings', 'stairs', 'wallColor', 'floor', 'name']) if (JSON.stringify(msg.state[key]) !== JSON.stringify(home.state[key])) return send(ws, 'error', { message: 'Only builders can change the floor plan.' });
+          for (const key of ['boundary', 'sections', 'removedJoins', 'walls', 'openings', 'stairs', 'blueprints', 'floorBlueprints', 'floorOffsets', 'floorOrigins', 'wallColor', 'floor', 'name']) if (JSON.stringify(msg.state[key]) !== JSON.stringify(home.state[key])) return send(ws, 'error', { message: 'Only builders can change the floor plan.' });
         }
-        home.state = normalizePlan(msg.state); home.version++;
+        home.state = linkFloorBlueprints(normalizePlan(msg.state)); home.version++;
         persist();
         broadcast(home.id, 'updated', { state: home.state, version: home.version, by: ws.profile.name, clientId: msg.clientId });
       }

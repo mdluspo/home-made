@@ -31,9 +31,9 @@ export const makeId = () => globalThis.crypto.randomUUID();
 export function initialHome() {
   return {
     name: 'My house', description: 'An empty space, ready to become your home.',
-    geometryVersion: 2, floor: 'oak', wallColor: '#e7e5cf', grid: true,
+    geometryVersion: 2, floorNumberingVersion: 1, floor: 'oak', wallColor: '#e7e5cf', grid: true,
     boundary: [], sections: [], outlines: [], holes: [], walls: [], openings: [], stairs: [], custom: [],
-    items: [],
+    items: [], blueprints: [], floorBlueprints: {},
   };
 }
 // All geometry lives in a top-down plan. 50 drawing units = 1 metre.
@@ -66,6 +66,17 @@ export function getSections(home){
 export function floorOutlines(home){
   return home.outlines?.length?home.outlines:home.boundary.length>2?[home.boundary]:[];
 }
+// A sheet's origin is allocated once, not recomputed from its moving/resized
+// polygon. Geometry can then move relative to a stationary building reference.
+export function withFloorOrigins(home){
+  const origins={};
+  floorOutlines(home).forEach((ring,i)=>{
+    const level=home.floorLevels?.[i]??i+1,saved=home.floorOrigins?.[level];
+    origins[level]=saved&&Number.isFinite(saved.x)&&Number.isFinite(saved.y)?saved:{x:Math.min(...ring.map(p=>p.x)),y:Math.min(...ring.map(p=>p.y))};
+  });
+  if(home.floorOrigins&&Object.keys(home.floorOrigins).length===Object.keys(origins).length&&Object.entries(origins).every(([level,p])=>p===home.floorOrigins[level]))return home;
+  return {...home,floorOrigins:origins};
+}
 export function pointInHome(point,home){
   return floorOutlines(home).some(r=>pointInPolygon(point,r))&&!(home.holes||[]).some(r=>pointInPolygon(point,r));
 }
@@ -91,11 +102,14 @@ export function snapSection(section,others,tolerance=18){
   }
   return best?{...section,points:section.points.map(p=>({x:p.x+best.dx,y:p.y+best.dy}))}:section;
 }
-export function addFloorSection(home,points,type='custom'){
+export function addFloorSection(home,points,type='custom',origin=null){
+  home=withFloorOrigins(home);
   const sections=getSections(home);
   const section=snapSection({id:makeId(),type,points},sections);
-  return {...home,sections:[...sections,section]};
+  const nextLevel=nextFloorLevel(home);
+  return {...home,sections:[...sections,section],...(origin?{floorOrigins:{...home.floorOrigins,[nextLevel]:{x:origin.x,y:origin.y}}}:{})};
 }
+export const nextFloorLevel=home=>Math.max(0,...[...(home.floorLevels||[]),...getSections(home).map(s=>s.level)].map(n=>Number.isSafeInteger(n)&&n>0?n:0))+1;
 function sectionLayout(home){
   const sections=getSections(home).filter(s=>s.points.length>2&&planArea(s.points)>.01);
   let geometry=[];const joins=[];
@@ -124,8 +138,20 @@ function sectionLayout(home){
   // Render order is area-sorted; floor identity is not. Persist each section's
   // level and only allocate a number for a genuinely new detached component.
   const validLevel=n=>Number.isSafeInteger(n)&&n>0;
-  let nextLevel=Math.max(validLevel(home.nextLevel)?home.nextLevel:1,...sections.map(s=>validLevel(s.level)?s.level+1:1));
-  const components=outlines.map((ring,index)=>({index,sections:sections.filter(section=>section.points.some(p=>pointInPolygon(p,ring)||ring.some((a,i)=>distanceToSegment(p,a,ring[(i+1)%ring.length])<.01)))}));
+  let nextLevel=Math.max(1,...sections.map(s=>validLevel(s.level)?s.level+1:1));
+  const components=outlines.map((ring,index)=>({index,ring,sections:[]}));
+  // A shared corner is not ownership. Each section belongs to exactly one
+  // component, chosen by actual overlapping area; otherwise touching corners
+  // can assign the same section twice and burn new level numbers on every edit.
+  for(const section of sections){
+    let owner=null,best=0;
+    for(const component of components){
+      const overlap=polygonClipping.intersection(polygonOf(section.points),polygonOf(component.ring));
+      const area=overlap.reduce((sum,poly)=>sum+planArea(poly[0].map(([x,y])=>({x,y}))),0);
+      if(area>best){best=area;owner=component;}
+    }
+    owner?.sections.push(section);
+  }
   const used=new Set(),floorLevels=[],sectionLevels=new Map();
   // Migrations and newly split components follow saved section order, never
   // their size or their current left/right position on the canvas.
@@ -136,7 +162,7 @@ function sectionLayout(home){
     used.add(level);floorLevels[component.index]=level;
     for(const section of component.sections)sectionLevels.set(section.id,level);
   }
-  return {sections:sections.map(s=>({...s,level:sectionLevels.get(s.id)})),outlines,holes,boundary:outlines[0]||[],joins,floorLevels,nextLevel};
+  return {sections:sections.map(s=>({...s,level:sectionLevels.get(s.id)})),outlines,holes,boundary:outlines[0]||[],joins,floorLevels,nextLevel:Math.max(0,...used)+1};
 }
 const lerpPoint=(a,b,t)=>({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t});
 const closePoint=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y)<.05;
@@ -206,7 +232,7 @@ function mergeCollinearWalls(source){
     while(again){again=false;
       const [a,b]=wall.points,dx=b.x-a.x,dy=b.y-a.y,length=Math.hypot(dx,dy);if(length<.01)break;
       for(let j=i+1;j<result.length;j++){
-        const other=result[j];if(other.curved||other.points.length!==2||other.source!==wall.source)continue;
+        const other=result[j];if(other.curved||other.points.length!==2||other.source!==wall.source||(Number(other.thickness)||7)!==(Number(wall.thickness)||7))continue;
         const [c,d]=other.points;
         if(Math.abs((c.x-a.x)*dy-(c.y-a.y)*dx)/length>.05||Math.abs((d.x-a.x)*dy-(d.y-a.y)*dx)/length>.05)continue;
         const t=p=>((p.x-a.x)*dx+(p.y-a.y)*dy)/(length*length),tc=t(c),td=t(d),lo=Math.min(tc,td),hi=Math.max(tc,td);
@@ -223,8 +249,21 @@ function mergeCollinearWalls(source){
 // Walls belong to the plan: trim exterior portions and turn crossings into
 // shared endpoints. The same resulting geometry drives rooms and collisions.
 export function normalizePlan(home) {
-  const layout=sectionLayout(home),{joins,...shape}=layout;
-  home={...home,...shape};
+  // Upper floors may overhang lower ones. Never rescale user geometry or its
+  // belongings; discard only warnings left by the previous auto-fit behavior.
+  if(home.floorFitWarnings!==undefined){const {floorFitWarnings,...rest}=home;home=rest;}
+  const {joins,...shape}=sectionLayout(home);
+  home=withFloorOrigins({...home,...shape});
+  if(home.floorNumberingVersion!==1){
+    // One-time repair for plans saved with the old auto-allocation bug.
+    // Preserve level order and all geometry, and remap references together.
+    const levels=[...new Set(home.floorLevels)].sort((a,b)=>a-b),numbers=new Map(levels.map((n,i)=>[n,i+1]));
+    const remap=n=>numbers.get(n)??n;
+    const registration=value=>Object.fromEntries(Object.entries(value||{}).filter(([n])=>numbers.has(Number(n))).map(([n,p])=>[remap(Number(n)),p]));
+    const destination=n=>numbers.get(n)??numbers.get(levels.find(level=>level>=n))??levels.length+1;
+    const object=o=>({...o,...(o.level!=null?{level:remap(o.level)}:{}),...(o.toLevel!=null?{toLevel:destination(o.toLevel)}:{})});
+    home={...home,floorNumberingVersion:1,nextLevel:levels.length+1,sections:home.sections.map(s=>({...s,level:remap(s.level)})),floorLevels:home.floorLevels.map(remap),floorOrigins:registration(home.floorOrigins),floorOffsets:registration(home.floorOffsets),items:home.items.map(object),openings:home.openings.map(object),stairs:(home.stairs||[]).map(object)};
+  }
   if(!home.sections.length)return {...home,walls:[],openings:[]};
   const rings=[...home.outlines,...home.holes];
   const source=[...home.walls.filter(w=>w.source!=='join'),...joins];
@@ -350,8 +389,14 @@ export function validateHome(home) {
   if(home.sections!==undefined&&(!Array.isArray(home.sections)||home.sections.length>50||!home.sections.every(s=>typeof s.id==='string'&&Array.isArray(s.points)&&s.points.length>=3&&s.points.length<=2000&&s.points.every(point))))return false;
   if(home.removedJoins!==undefined&&(!Array.isArray(home.removedJoins)||home.removedJoins.length>500||!home.removedJoins.every(k=>typeof k==='string'&&k.length<300)))return false;
   if (!Array.isArray(home.openings) || home.openings.length > 200 || !home.openings.every(o => point(o) && ['door', 'window'].includes(o.type))) return false;
-  if(home.stairs!==undefined&&(!Array.isArray(home.stairs)||home.stairs.length>100||!home.stairs.every(s=>typeof s.id==='string'&&point(s)&&(s.kind===undefined||['straight','single-winder','double-winder','spiral','half-landing','quarter-landing'].includes(s.kind))&&(s.rotation===undefined||finite(s.rotation))&&(s.scale===undefined||finite(s.scale)&&s.scale>=.5&&s.scale<=2))))return false;
+  if(home.stairs!==undefined&&(!Array.isArray(home.stairs)||home.stairs.length>100||!home.stairs.every(s=>typeof s.id==='string'&&point(s)&&(s.kind===undefined||['straight','single-winder','double-winder','spiral','half-landing','quarter-landing'].includes(s.kind))&&(s.rotation===undefined||finite(s.rotation))&&(s.scale===undefined||finite(s.scale)&&s.scale>0&&s.scale<=2))))return false;
+  if(home.objectOrder!==undefined&&(!Array.isArray(home.objectOrder)||home.objectOrder.length>400||!home.objectOrder.every(id=>typeof id==='string'&&id.length<300)))return false;
+  if(home.blueprints!==undefined&&(!Array.isArray(home.blueprints)||home.blueprints.length>50||!home.blueprints.every(b=>b&&typeof b.id==='string'&&b.id.length<300&&typeof b.sourceSectionId==='string'&&b.sourceSectionId.length<300&&point(b)&&Array.isArray(b.outline)&&b.outline.length>=3&&b.outline.length<=2000&&b.outline.every(point))))return false;
+  if(home.floorBlueprints!==undefined&&(!home.floorBlueprints||typeof home.floorBlueprints!=='object'||Array.isArray(home.floorBlueprints)||Object.keys(home.floorBlueprints).length>50||Object.entries(home.floorBlueprints).some(([id,value])=>id.length>300||typeof value!=='string'||value.length>300)))return false;
+  if(home.floorOffsets!==undefined&&(!home.floorOffsets||typeof home.floorOffsets!=='object'||Array.isArray(home.floorOffsets)||Object.entries(home.floorOffsets).some(([n,p])=>!Number.isSafeInteger(Number(n))||Number(n)<1||!point(p))))return false;
+  if(home.floorOrigins!==undefined&&(!home.floorOrigins||typeof home.floorOrigins!=='object'||Array.isArray(home.floorOrigins)||Object.keys(home.floorOrigins).length>50||Object.entries(home.floorOrigins).some(([n,p])=>!Number.isSafeInteger(Number(n))||Number(n)<1||!point(p))))return false;
+  if(home.floorFitWarnings!==undefined&&(!Array.isArray(home.floorFitWarnings)||home.floorFitWarnings.length>50||!home.floorFitWarnings.every(w=>w&&Number.isSafeInteger(w.level)&&w.level>0&&Number.isSafeInteger(w.belowLevel)&&w.belowLevel>0)))return false;
   if (!home.walls.every(w => typeof w.id === 'string' && Array.isArray(w.points) && w.points.length >= 2 && w.points.length <= 2000 && w.points.every(point))) return false;
   if (!Array.isArray(home.custom) || home.custom.length > 50 || !home.custom.every(c => typeof c.id === 'string' && typeof c.name === 'string' && /^data:image\/(png|jpeg|webp);base64,/.test(c.src) && c.src.length < 3000000)) return false;
-  return home.items.every(i => typeof i.id === 'string' && (CATALOG.some(c => c.type === i.type) || home.custom.some(c => c.id === i.type)) && point(i) && finite(i.rotation) && finite(i.scale) && i.scale >= 0.2 && i.scale <= 3);
+  return home.items.every(i => typeof i.id === 'string' && (CATALOG.some(c => c.type === i.type) || home.custom.some(c => c.id === i.type)) && point(i) && finite(i.rotation) && finite(i.scale) && i.scale > 0 && i.scale <= 3);
 }
