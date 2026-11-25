@@ -90,7 +90,7 @@ export function setWallThickness(home,id,value){
 }
 export function moveSelection(home,s,delta){
   home=withFloorOrigins(home);
-if(s.boundary)return {...home,boundary:home.boundary.map(p=>shifted(p,delta)),sections:getSections(home).map(section=>({...section,points:section.points.map(p=>shifted(p,delta))})),outlines:floorOutlines(home).map(r=>r.map(p=>shifted(p,delta))),holes:(home.holes||[]).map(r=>r.map(p=>shifted(p,delta))),walls:home.walls.map(w=>({...w,points:w.points.map(p=>shifted(p,delta))})),stairs:(home.stairs||[]).map(i=>shifted(i,delta)),items:home.items.map(i=>shifted(i,delta)),openings:home.openings.map(o=>shifted(o,delta))};
+if(s.boundary)return {...home,boundary:home.boundary.map(p=>shifted(p,delta)),sections:getSections(home).map(section=>({...section,points:section.points.map(p=>shifted(p,delta))})),outlines:floorOutlines(home).map(r=>r.map(p=>shifted(p,delta))),holes:(home.holes||[]).map(r=>r.map(p=>shifted(p,delta))),walls:home.walls.map(w=>({...w,points:w.points.map(p=>shifted(p,delta))})),stairs:(home.stairs||[]).map(i=>shifted(i,delta)),items:home.items.map(i=>shifted(i,delta)),openings:home.openings.map(o=>shifted(o,delta)),...(home.roomDecor?{roomDecor:home.roomDecor.map(r=>shifted(r,delta))}:{})};
   if(s.sections?.length)return transformFloorSections(home,s.sections,p=>shifted(p,delta),true);
   home=detachJoins(home,s.walls);
   const movedNodes=[];
@@ -135,7 +135,7 @@ function transformFloorSections(home,ids,transform,snap=false){
   // Carry belongings with the selected section; generated seams are rebuilt
   // from the new layout rather than dragged as loose wall objects.
   const movePoint=p=>{const section=chosen.find(s=>belongs(p,s))||(p.id&&!originals.some(s=>belongs(p,s))?chosen.find(s=>s.level===objectFloorLevel(home,p)):null);if(!section)return p;const before=transform(section.points[0]),after=transformed.find(s=>s.id===section.id).points[0],q=transform(p);return {...p,x:q.x+after.x-before.x,y:q.y+after.y-before.y};};
-  return normalizePlan({...home,sections:[...stationary,...moved],walls:home.walls.filter(w=>w.source!=='join').map(w=>({...w,points:w.points.map(movePoint)})),stairs:(home.stairs||[]).map(movePoint),items:home.items.map(movePoint),openings:home.openings.map(movePoint)});
+  return normalizePlan({...home,sections:[...stationary,...moved],walls:home.walls.filter(w=>w.source!=='join').map(w=>({...w,points:w.points.map(movePoint)})),stairs:(home.stairs||[]).map(movePoint),items:home.items.map(movePoint),openings:home.openings.map(movePoint),...(home.roomDecor?{roomDecor:home.roomDecor.map(movePoint)}:{})});
 }
 export function outlineBounds(boundary){
   if(!boundary.length)return null;
@@ -221,7 +221,7 @@ export function resizeOutline(home,corner,target,{proportional=false,sectionId=n
   else{sx=Math.max(20/b.width,sx);sy=Math.max(20/b.height,sy);}
   const transform=p=>({...p,x:anchor.x+(p.x-anchor.x)*sx,y:anchor.y+(p.y-anchor.y)*sy});
   if(ids)return transformFloorSections(home,ids,transform);
-  return {...home,boundary:home.boundary.map(transform),sections:getSections(home).map(s=>({...s,points:s.points.map(transform)})),outlines:floorOutlines(home).map(r=>r.map(transform)),holes:(home.holes||[]).map(r=>r.map(transform)),walls:home.walls.map(w=>({...w,points:w.points.map(transform)})),stairs:(home.stairs||[]).map(transform),items:home.items.map(transform),openings:home.openings.map(o=>({...transform(o),angle:Math.atan2(Math.sin((o.angle||0)*Math.PI/180)*sy,Math.cos((o.angle||0)*Math.PI/180)*sx)*180/Math.PI}))};
+  return {...home,boundary:home.boundary.map(transform),sections:getSections(home).map(s=>({...s,points:s.points.map(transform)})),outlines:floorOutlines(home).map(r=>r.map(transform)),holes:(home.holes||[]).map(r=>r.map(transform)),walls:home.walls.map(w=>({...w,points:w.points.map(transform)})),stairs:(home.stairs||[]).map(transform),items:home.items.map(transform),openings:home.openings.map(o=>({...transform(o),angle:Math.atan2(Math.sin((o.angle||0)*Math.PI/180)*sy,Math.cos((o.angle||0)*Math.PI/180)*sx)*180/Math.PI})),...(home.roomDecor?{roomDecor:home.roomDecor.map(transform)}:{})};
 }
 
 // Exact lengths use the same geometry as dragging. Horizontal/vertical edges
@@ -268,6 +268,7 @@ export function deleteSelection(home,s){
   const sections=getSections(home).filter(section=>!s.boundary&&!s.sections?.includes(section.id));
   const removedJoins=[...new Set([...(home.removedJoins||[]),...home.walls.filter(w=>s.walls.includes(w.id)&&w.joinKey).map(w=>w.joinKey)])];
   const changed={...home,sections,removedJoins,boundary:s.boundary||!sections.length?[]:home.boundary,outlines:s.boundary||!sections.length?[]:home.outlines,walls:s.boundary?[]:home.walls.filter(w=>!s.walls.includes(w.id)),items:home.items.filter(i=>!s.items.includes(i.id)||i.locked),openings:s.boundary?[]:home.openings.filter(o=>!s.openings.includes(o.id))};
+  if(home.roomDecor)changed.roomDecor=home.roomDecor.filter(r=>!s.boundary&&!getSections(home).some(section=>s.sections?.includes(section.id)&&belongs(r,section)));
   changed.stairs=(home.stairs||[]).filter(stair=>!s.boundary&&!s.stairs?.includes(stair.id)&&!getSections(home).some(section=>s.sections?.includes(section.id)&&belongs(stair,section)));
   return s.sections?.length?normalizePlan(changed):changed;
 }

@@ -1,4 +1,5 @@
 import polygonClipping from 'polygon-clipping';
+import {validateDesign} from './design.js';
 
 export const CATALOG = [
   { type: 'sofa', name: 'Sofa', category: 'Furniture', color: '#a9b68c', tag: 'A soft place to land', w: 180, h: 140 },
@@ -401,5 +402,5 @@ export function validateHome(home) {
   if(home.floorFitWarnings!==undefined&&(!Array.isArray(home.floorFitWarnings)||home.floorFitWarnings.length>50||!home.floorFitWarnings.every(w=>w&&Number.isSafeInteger(w.level)&&w.level>0&&Number.isSafeInteger(w.belowLevel)&&w.belowLevel>0)))return false;
   if (!home.walls.every(w => typeof w.id === 'string' && Array.isArray(w.points) && w.points.length >= 2 && w.points.length <= 2000 && w.points.every(point))) return false;
   if (!Array.isArray(home.custom) || home.custom.length > 50 || !home.custom.every(c => typeof c.id === 'string' && typeof c.name === 'string' && /^data:image\/(png|jpeg|webp);base64,/.test(c.src) && c.src.length < 3000000)) return false;
-  return home.items.every(i => typeof i.id === 'string' && (CATALOG.some(c => c.type === i.type) || home.custom.some(c => c.id === i.type)) && point(i) && finite(i.rotation) && finite(i.scale) && i.scale > 0 && i.scale <= 3);
+  return validateDesign(home)&&home.items.every(i => typeof i.id === 'string' && (CATALOG.some(c => c.type === i.type) || home.custom.some(c => c.id === i.type)) && point(i) && finite(i.rotation) && finite(i.scale) && i.scale > 0 && i.scale <= 3);
 }

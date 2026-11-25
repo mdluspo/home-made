@@ -1,9 +1,18 @@
-import React,{useLayoutEffect,useRef,useState} from 'react';
-import {ArrowDown,ArrowUp,Copy,FlipHorizontal2,LockKeyhole,RotateCcw,RotateCw} from 'lucide-react';
+import React,{useEffect,useLayoutEffect,useRef,useState} from 'react';
+import {ArrowDown,ArrowUp,Copy,FlipHorizontal2,LockKeyhole,RotateCcw,RotateCw,Palette} from 'lucide-react';
 import {SketchFrame} from './SketchFrame.jsx';
+import {FinishPicker} from './DesignControls.jsx';
 
-export function FurnitureToolbar({item,bounds,groupRef,workspaceRef,viewKey,onAction,onLock,canEdit}){
+export function FurnitureToolbar({item,bounds,groupRef,workspaceRef,viewKey,onAction,onLock,canEdit,onChange}){
   const ref=useRef(null),[anchor,setAnchor]=useState(null);
+  const [finishes,setFinishes]=useState(false);
+  useEffect(()=>{
+    if(!finishes)return;
+    const outside=e=>{if(!ref.current?.contains(e.target))setFinishes(false);};
+    const escape=e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();setFinishes(false);}};
+    document.addEventListener('pointerdown',outside,true);window.addEventListener('keydown',escape,true);
+    return()=>{document.removeEventListener('pointerdown',outside,true);window.removeEventListener('keydown',escape,true);};
+  },[finishes]);
   useLayoutEffect(()=>{
     const update=()=>{
       const matrix=groupRef.current?.getScreenCTM(),workspace=workspaceRef.current,toolbar=ref.current;
@@ -31,6 +40,8 @@ export function FurnitureToolbar({item,bounds,groupRef,workspaceRef,viewKey,onAc
     {button('flip','Flip horizontally',FlipHorizontal2)}
     <span className="furniture-tool-divider"/>
     {button('duplicate','Duplicate piece',Copy)}
+    {onChange&&!['cat','plant','fern'].includes(item.type)&&<button type="button" className={`icon-button ${finishes?'active':''}`} title="Furniture finishes" aria-label="Furniture finishes" aria-expanded={finishes} disabled={disabled} onClick={()=>setFinishes(v=>!v)}><Palette size={18}/></button>}
     <button type="button" className={`icon-button ${item.locked?'active':''}`} title={item.locked?'Unlock piece':'Lock piece'} aria-label={item.locked?'Unlock piece':'Lock piece'} aria-pressed={!!item.locked} disabled={!canEdit} onClick={onLock}><LockKeyhole size={18} strokeWidth={1.65}/></button>
+    {finishes&&onChange&&<FinishPicker item={item} disabled={disabled} onChange={onChange}/>}
   </div>;
 }

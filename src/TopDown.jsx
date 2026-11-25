@@ -6,6 +6,7 @@ import {LevelLabels} from './LevelLabels.jsx';
 import {StairObject} from './Stairs.jsx';
 import {gameCursor} from './cursors.js';
 import clipping from 'polygon-clipping';
+import {WOOD_FINISHES,FABRIC_FINISHES,materialColor} from './design.js';
 
 const pathOf=points=>'M'+points.map(p=>`${p.x},${p.y}`).join(' L');
 // Height always rises in screen Y; rotating a wall never rotates its verticals.
@@ -181,7 +182,7 @@ export function TopDownRoom({home,onDoor,onStairDown,showLabels=true,showStairs=
 
 // RPG-style three-quarter overhead art: axes stay square to the room, while
 // height is drawn upward to show fronts as well as tops. No isometric skew.
-export function TopDownFurniture({type,custom}){
+export function TopDownFurniture({type,custom,finish}){
   const [w,h]=furnitureFootprint(type),x=-w/2,y=-h/2;
   const box=(fill,rx=3)=><rect x={x} y={y} width={w} height={h} rx={rx} fill={fill}/>;
   const face=(fill,top,height,left=x,width=w)=><rect className="sprite-front-face" x={left} y={top} width={width} height={height} rx="1" fill={fill}/>;
@@ -307,8 +308,23 @@ export function TopDownFurniture({type,custom}){
   }
   return <g className={`topdown-furniture sprite-${type}`} data-perspective={custom?'sticker':'three-quarter'} stroke="#69755c" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
     {type!=='rug'&&!custom&&<ellipse className="sprite-ground-shadow" cy={h/2+2} rx={w*.47} ry="4" fill="#596344" opacity=".13" stroke="none"/>}
-    {art}
+    {finish&&!custom?recolorFurniture(art,type,finish):art}
   </g>;
+}
+
+function recolorFurniture(node,type,finish){
+  if(!React.isValidElement(node)||['plant','fern','cat'].includes(type))return node;
+  const wood=WOOD_FINISHES.find(f=>f.id===finish.wood)?.color,fabric=FABRIC_FINISHES.find(f=>f.id===finish.fabric)?.color;
+  const props={};
+  if(typeof node.props.fill==='string'&&/^#[a-f\d]{6}$/i.test(node.props.fill)&&!node.props.className?.includes('shadow')){
+    const [r,g,b]=node.props.fill.match(/[a-f\d]{2}/gi).map(n=>parseInt(n,16));
+    const textile=['sofa','bed','rug'].includes(type)&&(g>r*.98&&g>b*1.03||r>210&&g>200&&b>170)||type==='chair'&&['#e4c694','#e3c795'].includes(node.props.fill)||type==='lamp'&&['#e8cd92','#f2dfad','#eddaaa'].includes(node.props.fill);
+    const accent=type==='books'&&g>r*.98&&g>b*1.02||['fridge','stove'].includes(type)&&['#9daf96','#c2ceb0','#8f9e90','#dce0d0'].includes(node.props.fill)||type==='kettle';
+    const target=(textile||accent)?fabric:r>b*1.12&&g>b*1.04?wood:null;
+    if(target)props.fill=materialColor(node.props.fill,target);
+  }
+  if(node.props.children)props.children=React.Children.map(node.props.children,child=>recolorFurniture(child,type,finish));
+  return React.cloneElement(node,props);
 }
 
 export function TopDownPreview({type,custom}){
