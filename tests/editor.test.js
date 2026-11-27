@@ -15,19 +15,21 @@ test('moving a selected floor plan moves its walls, belongings, and bounds in th
   assert.equal(draft.items[0].x,home.items[0].x+80);assert.equal(draft.walls[0].points[0].y,home.walls[0].points[0].y+40);
   assert.equal(home.boundary[0].x,200,'preview must not mutate saved geometry');
 });
-test('moving one junction keeps every connected wall attached at that shared vertex',()=>{
+test('moving one divider endpoint leaves every neighboring divider independent',()=>{
   const home=sample(),draft=moveVertex(home,'a',1,{x:540,y:390});
   const at=draft.walls.flatMap(w=>w.points).filter(p=>p.x===540&&p.y===390);
-  assert.equal(at.length,3);
+  assert.equal(at.length,1);
+  assert.deepEqual(draft.walls.find(w=>w.id==='b'),home.walls.find(w=>w.id==='b'));
+  assert.deepEqual(draft.walls.find(w=>w.id==='c'),home.walls.find(w=>w.id==='c'));
 });
-test('moving a divider preserves its connection to the exterior wall',()=>{
+test('moving a divider translates only that placed wall without pinning its ends',()=>{
   const home=sample(),draft=moveSelection(home,{...emptySelection(),walls:['a']},{x:30,y:20});
-  assert.deepEqual(draft.walls.find(w=>w.id==='a').points[0],{x:200,y:370});
-  assert.deepEqual(draft.walls.find(w=>w.id==='b').points[0],{x:530,y:370});
+  assert.deepEqual(draft.walls.find(w=>w.id==='a').points[0],{x:230,y:370});
+  assert.deepEqual(draft.walls.find(w=>w.id==='b'),home.walls.find(w=>w.id==='b'));
 });
 
 test('dragging a freehand divider body translates all its points and its attached opening',()=>{
-  const home=normalizePlan({...initialHome(),boundary:rectangleFromPoints({x:200,y:150},{x:800,y:550}),walls:[{id:'curve',curved:true,points:[{x:300,y:230},{x:450,y:280},{x:600,y:250}]}],openings:[{id:'door',type:'door',x:450,y:280,angle:0}]});
+  const home=normalizePlan({...initialHome(),boundary:rectangleFromPoints({x:200,y:150},{x:800,y:550}),walls:[{id:'curve',curved:true,curveMode:'three-point',points:[{x:300,y:230},{x:450,y:280},{x:600,y:250}]}],openings:[{id:'door',type:'door',x:450,y:280,angle:0}]});
   const original=home.walls.find(w=>w.id==='curve'),delta={x:25,y:40};
   const draft=moveSelection(home,{...emptySelection(),walls:['curve']},delta);
   assert.deepEqual(draft.walls.find(w=>w.id==='curve').points,original.points.map(p=>({x:p.x+25,y:p.y+40})));
@@ -45,7 +47,7 @@ test('dragging a divider endpoint on the exterior never edits the base outline',
   assert.deepEqual(draft.boundary,home.boundary);
   assert.deepEqual(draft.sections,home.sections);
   assert.deepEqual(draft.outlines,home.outlines);
-  assert.deepEqual(draft.walls.find(w=>w.id==='a').points[0],{x:200,y:390});
+  assert.deepEqual(draft.walls.find(w=>w.id==='a').points[0],{x:250,y:390});
 });
 test('moving a generated shared divider persists independently of both floor sections',()=>{
   const home=normalizePlan({...initialHome(),sections:[{id:'left',points:rectangleFromPoints({x:100,y:100},{x:400,y:500})},{id:'right',points:rectangleFromPoints({x:400,y:100},{x:700,y:500})}]});

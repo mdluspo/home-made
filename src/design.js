@@ -1,5 +1,6 @@
 import clipping from 'polygon-clipping';
 import {floorOutlines,pointInPolygon,PLAN_UNIT} from './model.js';
+import {dividerPolylines} from './dividers.js';
 
 export const WOOD_FINISHES=[{id:'oak',name:'Honey oak',color:'#c8a577'},{id:'walnut',name:'Walnut',color:'#8c6952'},{id:'birch',name:'Pale birch',color:'#e3cfaa'},{id:'whitewash',name:'Whitewash',color:'#e5e2d4'}];
 export const FABRIC_FINISHES=[{id:'sage',name:'Sage',color:'#a7b58c'},{id:'cream',name:'Linen',color:'#e9dfc7'},{id:'clay',name:'Terracotta',color:'#c58f77'},{id:'blue',name:'Dusty blue',color:'#96afb9'},{id:'rose',name:'Blush',color:'#c5a0a5'},{id:'charcoal',name:'Charcoal',color:'#737c73'}];
@@ -17,8 +18,8 @@ export function designRooms(home){
   if(!home.boundary?.length)return [];
   let geometry=floorOutlines(home).map(r=>[r.map(p=>[p.x,p.y])]);
   const cuts=(home.holes||[]).map(r=>[r.map(p=>[p.x,p.y])]);
-  for(const wall of home.walls)wall.points.slice(1).forEach((b,i)=>{
-    const a=wall.points[i],length=Math.hypot(b.x-a.x,b.y-a.y);if(length<.01)return;
+  for(const wall of home.walls)for(const path of dividerPolylines(wall))path.slice(1).forEach((b,i)=>{
+    const a=path[i],length=Math.hypot(b.x-a.x,b.y-a.y);if(length<.01)return;
     const half=Math.max(3,wall.thickness||7)/2,ux=(b.x-a.x)/length*half,uy=(b.y-a.y)/length*half;
     cuts.push([[[a.x-ux-uy,a.y-uy+ux],[b.x+ux-uy,b.y+uy+ux],[b.x+ux+uy,b.y+uy-ux],[a.x-ux+uy,a.y-uy-ux]]]);
   });

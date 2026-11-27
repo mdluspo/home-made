@@ -29,7 +29,7 @@ export function ToolGlyph({kind,sideways=false}){
 }
 const GROUPS=[
   {id:'outline',name:'Home Outline',options:[{id:'rectangle',name:'Rectangle',hint:'Drag out a rectangular home'},{id:'polygon',name:'Polygon',hint:'Click corners; close at the first point'},{id:'ellipse',name:'Ellipse',hint:'Drag to draw a round home'},{id:'boundary',name:'Freehand outline',hint:'Draw any closed shape'}]},
-  {id:'divider',name:'Room Dividers',options:[{id:'wall',name:'Straight divider',hint:'Draw a wall that splits your space'},{id:'freeform',name:'Curved divider',hint:'Draw a smooth, freeform wall'}]},
+  {id:'divider',name:'Room Dividers',options:[{id:'wall',name:'Straight divider',hint:'Draw a wall that splits your space'},{id:'freeform',name:'Curved divider',hint:'Draw a line, then bend it with three points'}]},
   {id:'openings',name:'Doors & Windows',options:[{id:'door',name:'Door',hint:'Place a door on a wall'},{id:'window',name:'Window',hint:'Place a window on a wall'}]},
   {id:'vertical',name:'Stairs',options:STAIR_TYPES.map(t=>({id:t.id==='straight'?'stairs':`stairs-${t.id}`,name:t.name,hint:'Click inside the active floor to place stairs'}))},
 ];

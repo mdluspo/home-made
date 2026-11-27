@@ -27,6 +27,7 @@ import './interface.css';
 import './cursors.css';
 import {cursorStyles,gameCursor} from './cursors.js';
 import {makeStickerCutout} from './stickerBackground.js';
+import {dividerControls,dividerPolylines} from './dividers.js';
 import './design.css';
 
 const CATEGORIES = [{ name: 'All pieces', icon: Grid2X2 }, { name: 'Furniture', icon: Armchair }, { name: 'Plants', icon: Sprout }, { name: 'Decor', icon: Flower2 }, { name: 'Lighting', icon: Lightbulb }, { name: 'Kitchen', icon: Coffee }, { name: 'Bedroom', icon: Moon }];
@@ -196,19 +197,19 @@ function App() {
     commit(h => ({ ...h, items: [...h.items, item] }));
     setSelected(item.id);setSelection({...emptySelection(),items:[item.id]}); setMode('decorate'); setPage('home'); setTool('select');
   };
-  const snapPoint = p => {
-    const points = [...(home.boundary.length ? home.boundary : DEFAULT_BOUNDARY), ...home.walls.flatMap(w => [w.points[0], w.points.at(-1)])];
+  const snapPoint = (p,excludeWallId=null) => {
+    const points = [...(home.boundary.length ? home.boundary : DEFAULT_BOUNDARY), ...home.walls.filter(w=>w.id!==excludeWallId).flatMap(w => [w.points[0], w.points.at(-1)])];
     const nearby = points.find(q => Math.hypot(q.x-p.x, q.y-p.y) < 23);
-    if(nearby)return nearby;
-    const wall=nearestWall(p);
+    if(nearby)return {...nearby};
+    const wall=nearestWall(p,excludeWallId);
     return wall.dist<13?wall.point:{ x: Math.round(p.x/10)*10, y: Math.round(p.y/10)*10 };
   };
-  const nearestWall = p => {
+  const nearestWall = (p,excludeWallId=null) => {
     let best = { point: p, dist: Infinity };
     const boundary = home.boundary.length ? home.boundary : DEFAULT_BOUNDARY;
-    for (const wall of [...floorOutlines(home).map(r=>({points:[...r,r[0]]})), ...home.walls]) {
-      for (let i = 1; i < wall.points.length; i++) {
-        const a = wall.points[i-1], b = wall.points[i], dx = b.x-a.x, dy = b.y-a.y;
+    for (const path of [...floorOutlines(home).map(r=>[...r,r[0]]),...home.walls.filter(w=>w.id!==excludeWallId).flatMap(dividerPolylines)]) {
+      for (let i = 1; i < path.length; i++) {
+        const a = path[i-1], b = path[i], dx = b.x-a.x, dy = b.y-a.y;
         const t = Math.max(0, Math.min(1, ((p.x-a.x)*dx+(p.y-a.y)*dy)/(dx*dx+dy*dy || 1)));
         const q = { x: a.x+t*dx, y: a.y+t*dy };
         const dist = Math.hypot(q.x-p.x,q.y-p.y);
@@ -241,7 +242,7 @@ function App() {
       polygonDraft.current=[...draft,point];setStroke([...polygonDraft.current]);return;
     }
     if (mode === 'build' && ['rectangle', 'ellipse', 'wall', 'freeform', 'boundary'].includes(tool) && buildable) {
-      const point = ['wall','rectangle','ellipse'].includes(tool) ? snapPoint(p) : p;
+      const point = ['wall','freeform','rectangle','ellipse'].includes(tool) ? snapPoint(p) : p;
       drawing.current = [point]; setStroke([point]); e.currentTarget.setPointerCapture(e.pointerId); setSelected(null); return;
     }
     if (mode === 'build' && ['door', 'window'].includes(tool) && buildable) {
@@ -279,6 +280,10 @@ function App() {
     if(mode==='build'&&tool==='polygon'&&polygonDraft.current.length)setStroke([...polygonDraft.current,snapPoint(p)]);
     if (dragging.current) {
       const d = dragging.current;
+      if(d.screenStart&&!d.moved){
+        if(Math.hypot(e.clientX-d.screenStart.x,e.clientY-d.screenStart.y)<4)return;
+        d.moved=true;
+      }
       if(d.blueprintId){
         d.result={home:{...d.home,blueprints:d.home.blueprints.map(b=>b.id===d.blueprintId?{...b,x:b.x+p.x-d.start.x,y:b.y+p.y-d.start.y}:b)}};
         setPreview(d.result);
@@ -291,17 +296,18 @@ function App() {
         d.result={home:moveSelection(d.home,d.selection,delta)};
         setPreview(d.result);
       }else if (d.wallId) {
-        const target=d.vertexOffset?{x:p.x-d.vertexOffset.x,y:p.y-d.vertexOffset.y}:snapPoint(p);
+        const rawTarget=d.vertexOffset?{x:p.x-d.vertexOffset.x,y:p.y-d.vertexOffset.y}:p;
+        const target=d.wallVertex&&!d.curveMiddle?snapPoint(rawTarget,d.wallId):d.vertexOffset||d.curveMiddle?rawTarget:snapPoint(p,d.wallId);
         if(d.vertexOffset&&e.ctrlKey){target.x=Math.round(target.x/10)*10;target.y=Math.round(target.y/10)*10;}
         d.result={home:moveVertex(d.home,d.wallId,d.handle,target)};setPreview(d.result);
       } else if (d.resize) {
-        setPreview({ id: d.id, scale: Math.max(.2,Math.min(3, Math.hypot(p.x-d.center.x,p.y-d.center.y)/d.distance*d.scale)) });
-      } else setPreview({ id: d.id, x: p.x-d.offset.x, y:p.y-d.offset.y });
+        d.result={ id: d.id, scale: Math.max(.2,Math.min(3, Math.hypot(p.x-d.center.x,p.y-d.center.y)/d.distance*d.scale)) };setPreview(d.result);
+      } else {d.result={ id: d.id, x: p.x-d.offset.x, y:p.y-d.offset.y };setPreview(d.result);}
     }
     if (drawing.current) {
-      if (['wall','rectangle','ellipse'].includes(tool)) {
+      if (['wall','freeform','rectangle','ellipse'].includes(tool)) {
         const a=drawing.current[0],b={...snapPoint(p)};
-        if(tool==='wall'){if(Math.abs(a.x-b.x)<10)b.x=a.x;if(Math.abs(a.y-b.y)<10)b.y=a.y;}
+        if(tool==='wall'||tool==='freeform'){if(Math.abs(a.x-b.x)<10)b.x=a.x;if(Math.abs(a.y-b.y)<10)b.y=a.y;}
         drawing.current = [a,b];
       }
       else drawing.current.push({ x:p.x, y:p.y });
@@ -321,13 +327,13 @@ function App() {
       marqueeRef.current=null;setMarquee(null);return;
     }
     if(tool==='polygon'&&polygonDraft.current.length)return;
-    const result=dragging.current?.result||preview;
+    const result=dragging.current?.result;
     if (dragging.current && result) {
       if(result.home)commit(result.home);
       else { const {id,...values}=result; modifyItem(id,values); }
     }
     if (drawing.current?.length > 1) {
-      const points = cleanPoints(drawing.current, tool === 'wall');
+      const points = cleanPoints(drawing.current, tool === 'wall'||tool==='freeform');
       if(['rectangle','ellipse'].includes(tool)){
         let boundary=rectangleFromPoints(points[0],points.at(-1));
         if(tool==='ellipse'){const a=boundary[0],b=boundary[2],cx=(a.x+b.x)/2,cy=(a.y+b.y)/2;boundary=Array.from({length:64},(_,i)=>({x:cx+(b.x-a.x)/2*Math.cos(i/64*Math.PI*2),y:cy+(b.y-a.y)/2*Math.sin(i/64*Math.PI*2)}));}
@@ -337,17 +343,20 @@ function App() {
           commit(h=>addFloorSection(h,points,'freeform',draftFloor)); notify('A little place, in a shape all your own.');
         } else notify('Draw a larger, closed shape for your home.');
       } else if (Math.hypot(points[0].x-points.at(-1).x,points[0].y-points.at(-1).y)>12 || points.length>4) {
-        commit(h=>addDivider(h,{id:makeId(),points,curved:tool==='freeform'}));
+        const id=makeId(),curved=tool==='freeform',a=points[0],b=points.at(-1);
+        const controls=curved?[a,{x:(a.x+b.x)/2,y:(a.y+b.y)/2},b]:points;
+        commit(h=>addDivider(h,{id,points:controls,curved,...(curved?{curveMode:'three-point'}:{})}));
+        if(curved){setTool('select');setSelectedWall(id);setSelection({...emptySelection(),walls:[id]});}
       }
     }
     dragging.current=null; drawing.current=null; setPreview(null); setStroke([]);setDraggedObjects([]);
   };
   const startGroupDrag=(e,next=selection)=>{
     if(e.button!==0||tool!=='select'||mode==='explore'||!editable)return;
-    e.stopPropagation();setSelection(next);
+    e.stopPropagation();setSelection(next);setPreview(null);
     setDraggedObjects([...next.items,...(next.stairs||[])]);
     if(mode==='build'){const floor=floorAtPoint(home,pointFromEvent(e));if(floor)setActiveLevel(floor.level);}
-    dragging.current={group:true,home,selection:next,start:pointFromEvent(e)};
+    dragging.current={group:true,home,selection:next,start:pointFromEvent(e),screenStart:{x:e.clientX,y:e.clientY},moved:false};
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const startBlueprintDrag=(e,blueprint)=>{
@@ -382,13 +391,21 @@ function App() {
     if (e.button!==0 || mode!=='build' || !buildable) return;
     if (tool==='eraser') {e.stopPropagation();commit(h=>({...h,walls:h.walls.filter(w=>w.id!==wall.id)}));return;}
     if(tool!=='select')return;
+    if(handle===undefined){
+      const p=pointFromEvent(e),distance=w=>Math.min(...dividerPolylines(w).flatMap(path=>path.slice(1).map((q,i)=>distanceToSegment(p,path[i],q))));
+      const candidates=home.walls.map(w=>({wall:w,distance:distance(w)})).filter(hit=>hit.distance<12).sort((a,b)=>a.distance-b.distance);
+      if(candidates.length){const nearest=candidates[0].distance,tied=candidates.filter(hit=>hit.distance<=nearest+.5),current=tied.findIndex(hit=>hit.wall.id===selectedWall);wall=tied.length>1&&current>=0?tied[(current+1)%tied.length].wall:candidates[0].wall;}
+    }
     const floor=floorAtPoint(home,pointFromEvent(e));if(floor)setActiveLevel(floor.level);
     e.stopPropagation();setSelected(null);
     drawing.current=null;polygonDraft.current=[];setStroke([]);
     if(e.shiftKey){toggleSelected('walls',wall.id);return;}
     setSelectedWall(wall.id);
     if(handle===undefined){startGroupDrag(e,selection.walls.includes(wall.id)&&!selection.boundary&&!selection.sections?.length?selection:{...emptySelection(),walls:[wall.id]});return;}
-    dragging.current={wallId:wall.id,home,handle};
+    setSelection({...emptySelection(),walls:[wall.id]});
+    const p=pointFromEvent(e),control=wall.curved?dividerControls(wall)[handle]:wall.points[handle];
+    setPreview(null);
+    dragging.current={wallId:wall.id,home,handle,curveMiddle:wall.curved&&handle===1,wallVertex:true,vertexOffset:{x:p.x-control.x,y:p.y-control.y},screenStart:{x:e.clientX,y:e.clientY},moved:false};
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const startBoundaryDrag=(e,handle)=>{
@@ -705,10 +722,10 @@ function App() {
       <section className={`workspace ${mode==='build'?'building':''} tool-${tool} ${panning?'camera-panning':''}`} ref={workspaceRef} aria-label="Your home editor">
         {!floorOverview&&mode!=='explore'&&<Toolbox mode={mode} tool={tool} onChoose={chooseTool} canEdit={editable} hasSelection={groupCount>0||!!selectedItem} locked={selectedItem?.locked} onAction={toolAction} outlineEditMode={outlineEditMode} onOutlineEditMode={setOutlineEditMode} onAddBlueprint={addBlueprint} canAddBlueprint={buildable&&floorLayers.floors.length>0&&(home.blueprints||[]).length<50}/>}
 
-        {mode==='build'&&tool!=='select'&&<div className="drawing-hint"><Pencil size={14}/>{({rectangle:'Click and drag to draw your home outline',polygon:'Click each corner. Click the first point to close your outline.',wall:'Click and drag to divide a room',freeform:'Draw freely. We’ll smooth the little wobbles.',boundary:'Draw a closed outline to reshape your home',door:'Click near a wall to add a door',window:'Click near a wall to add a window',eraser:'Click a wall or opening to remove it'})[tool]}</div>}
+        {mode==='build'&&tool!=='select'&&<div className="drawing-hint"><Pencil size={14}/>{({rectangle:'Click and drag to draw your home outline',polygon:'Click each corner. Click the first point to close your outline.',wall:'Click and drag to divide a room',freeform:'Drag a line, then use its three points to bend the divider.',boundary:'Draw a closed outline to reshape your home',door:'Click near a wall to add a door',window:'Click near a wall to add a window',eraser:'Click a wall or opening to remove it'})[tool]}</div>}
         {!floorOverview&&<svg ref={svgRef} className="room-scene" viewBox="0 0 1080 760" role="img" aria-label={mode==='build'?'Top-down floor plan editor':'Your top-down home'} onContextMenu={e=>{e.preventDefault();if(!cameraDrag.current&&performance.now()>suppressContextUntil.current)onFloorContext(e);}} onPointerDownCapture={onCameraDown} onPointerDown={onSceneDown} onPointerMove={onSceneMove} onPointerUp={onSceneUp} onPointerCancel={()=>{cameraDrag.current=null;setPanning(false);dragging.current=null;setDraggedObjects([]);drawing.current=null;marqueeRef.current=null;setMarquee(null);setPreview(null);setStroke([]);}} onDragOver={e=>{e.preventDefault();e.dataTransfer.dropEffect='copy';}} onDrop={e=>{e.preventDefault();const type=e.dataTransfer.getData('application/home-made');if(type)addItem(type,pointFromEvent(e));}}>
           <g ref={groupRef} transform={`translate(${camera.x+540*(1-zoom)} ${camera.y+385*(1-zoom)}) scale(${zoom}) translate(${floorShift.x} ${floorShift.y})`}>
-            {mode==='build'?<BuildPlans home={visibleHome} selectedWall={selectedWall} selection={selection} onWallDown={startWallDrag} onBoundaryDown={startBoundaryDrag} onDimensionEdit={buildable?editMeasurement:undefined} showGrid={home.grid} onOpeningDown={(e,o)=>{if(tool!=='select')return;e.stopPropagation();if(e.shiftKey){toggleSelected('openings',o.id);return;}setSelectedWall(null);setSelected(null);setSelection({...emptySelection(),openings:[o.id]});}}/>:<FloorStack home={visibleHome} level={activeLevel} externalObjects showLabels={false} onDoor={o=>{if(mode!=='explore')return;if(!buildable)return notify('The homeowner controls this door.');const ids=new Set(o.doorIds||[o.id]);commit(h=>({...h,openings:h.openings.map(d=>ids.has(d.id)?{...d,open:!d.open}:d)}));}}/>}
+            {mode==='build'?<BuildPlans home={visibleHome} dividerEditable={tool==='select'&&buildable} selectedWall={selectedWall} selection={selection} onWallDown={startWallDrag} onBoundaryDown={startBoundaryDrag} onDimensionEdit={buildable?editMeasurement:undefined} showGrid={home.grid} onOpeningDown={(e,o)=>{if(tool!=='select')return;e.stopPropagation();if(e.shiftKey){toggleSelected('openings',o.id);return;}setSelectedWall(null);setSelected(null);setSelection({...emptySelection(),openings:[o.id]});}}/>:<FloorStack home={visibleHome} level={activeLevel} externalObjects showLabels={false} onDoor={o=>{if(mode!=='explore')return;if(!buildable)return notify('The homeowner controls this door.');const ids=new Set(o.doorIds||[o.id]);commit(h=>({...h,openings:h.openings.map(d=>ids.has(d.id)?{...d,open:!d.open}:d)}));}}/>}
             {mode==='build'&&<CanvasBlueprints home={visibleHome} selected={selectedBlueprint} interactive={tool==='select'&&buildable} onPointerDown={startBlueprintDrag}/>}
             {mode==='build'&&tool==='select'&&buildable&&!selectedBlueprint&&<FloorEdgeTargets home={visibleHome} onResize={startFloorEdgeResize}/>}
             <g className="decoration-layer">{sceneObjects.map(({kind,object:item})=>kind==='stair'?<StairObject key={item.id} stair={item} decorated={mode!=='build'} onPointerDown={onStairDown} destinationLevel={floorLayers.floors.find(f=>f.level===item.toLevel&&f.level>activeLevel)?.level||floorLayers.floors.find(f=>f.level>activeLevel)?.level}/>:mode==='build'?<PlanFurniture key={item.id} item={item} home={home} onPointerDown={onItemDown}/>:<g key={item.id} transform={`translate(${item.x} ${item.y}) rotate(${item.rotation||0}) scale(${item.scale||1})`} className={`furniture ${mode==='decorate'?'can-drag':''} ${selection.items.includes(item.id)?'is-selected':''}`} onPointerDown={e=>onItemDown(e,item)} style={{opacity:item.opacity??1}}>
@@ -717,8 +734,8 @@ function App() {
               </g>)}</g>
             {mode==='explore'&&home.boundary.length>2&&<TopDownCharacter {...position} color={profile?.color} name={profile?.name} sitting={sitting}/>}
             {mode!=='build'&&players.filter(p=>p.id!==profile?.id).map(p=><TopDownCharacter key={p.connectionId} {...p.position} color={p.color} name={p.name}/>)}
-            {!!stroke.length&&<g pointerEvents="none">{['rectangle','ellipse'].includes(tool)&&stroke.length>1?<><path d={tool==='ellipse'?ellipsePath(stroke[0],stroke.at(-1)):'M'+rectangleFromPoints(stroke[0],stroke.at(-1)).map(p=>p.x+','+p.y).join(' L')+' Z'} fill="#f9fbef88" stroke="#7c9965" strokeWidth="3" strokeDasharray="7 4"/><Dimension a={rectangleFromPoints(stroke[0],stroke.at(-1))[0]} b={rectangleFromPoints(stroke[0],stroke.at(-1))[1]} live/><Dimension a={rectangleFromPoints(stroke[0],stroke.at(-1))[1]} b={rectangleFromPoints(stroke[0],stroke.at(-1))[2]} live/></>:<><path d={['wall','polygon'].includes(tool)?'M'+stroke.map(p=>p.x+','+p.y).join(' L'):smoothPath(stroke,tool==='boundary')} fill={['polygon','boundary'].includes(tool)?'#c1cda329':'none'} stroke="#7c9965" strokeWidth="3" strokeDasharray="7 4" strokeLinecap="round"/>{tool==='wall'&&stroke.length>1&&<Dimension a={stroke[0]} b={stroke.at(-1)} live/>}{tool==='polygon'&&stroke.map((p,i)=><circle key={i} cx={p.x} cy={p.y} r={i===0?6:3} fill="#f9fbef" stroke="#7c9965" strokeWidth="1.5"/>)}</>}</g>}
-            {tool==='select'&&groupBounds&&groupCount>0&&!singleFurnitureSelection&&<g className="group-selection"><rect {...groupBounds} rx="3" fill="none" stroke="#fffdf1" strokeWidth="5" strokeDasharray="6 4" vectorEffect="non-scaling-stroke" pointerEvents="none"/><rect {...groupBounds} rx="3" fill="none" stroke="#5d7e48" strokeWidth="2.2" strokeDasharray="6 4" vectorEffect="non-scaling-stroke" pointerEvents={openingSelectionOnly?'none':'stroke'} onPointerDown={openingSelectionOnly?undefined:e=>startGroupDrag(e)}/>
+            {!!stroke.length&&<g pointerEvents="none">{['rectangle','ellipse'].includes(tool)&&stroke.length>1?<><path d={tool==='ellipse'?ellipsePath(stroke[0],stroke.at(-1)):'M'+rectangleFromPoints(stroke[0],stroke.at(-1)).map(p=>p.x+','+p.y).join(' L')+' Z'} fill="#f9fbef88" stroke="#7c9965" strokeWidth="3" strokeDasharray="7 4"/><Dimension a={rectangleFromPoints(stroke[0],stroke.at(-1))[0]} b={rectangleFromPoints(stroke[0],stroke.at(-1))[1]} live/><Dimension a={rectangleFromPoints(stroke[0],stroke.at(-1))[1]} b={rectangleFromPoints(stroke[0],stroke.at(-1))[2]} live/></>:<><path d={['wall','freeform','polygon'].includes(tool)?'M'+stroke.map(p=>p.x+','+p.y).join(' L'):smoothPath(stroke,tool==='boundary')} fill={['polygon','boundary'].includes(tool)?'#c1cda329':'none'} stroke="#7c9965" strokeWidth="3" strokeDasharray="7 4" strokeLinecap="round"/>{['wall','freeform'].includes(tool)&&stroke.length>1&&<Dimension a={stroke[0]} b={stroke.at(-1)} live/>}{tool==='polygon'&&stroke.map((p,i)=><circle key={i} cx={p.x} cy={p.y} r={i===0?6:3} fill="#f9fbef" stroke="#7c9965" strokeWidth="1.5"/>)}</>}</g>}
+            {tool==='select'&&groupBounds&&groupCount>0&&!singleFurnitureSelection&&!(mode==='build'&&groupCount===1&&selection.walls.length===1)&&<g className="group-selection"><rect {...groupBounds} rx="3" fill="none" stroke="#fffdf1" strokeWidth="5" strokeDasharray="6 4" vectorEffect="non-scaling-stroke" pointerEvents="none"/><rect {...groupBounds} rx="3" fill="none" stroke="#5d7e48" strokeWidth="2.2" strokeDasharray="6 4" vectorEffect="non-scaling-stroke" pointerEvents={openingSelectionOnly?'none':'stroke'} onPointerDown={openingSelectionOnly?undefined:e=>startGroupDrag(e)}/>
               {[[groupBounds.x,groupBounds.y],[groupBounds.x+groupBounds.width,groupBounds.y],[groupBounds.x+groupBounds.width,groupBounds.y+groupBounds.height],[groupBounds.x,groupBounds.y+groupBounds.height]].map(([x,y],i)=><g key={i} className={canResizeOutline?'selection-box-resize-handle':undefined} aria-label={canResizeOutline?`Resize outline width and height ${i+1}`:undefined} pointerEvents={canResizeOutline?'all':'none'} style={canResizeOutline?{cursor:gameCursor(i%2===0?'nwse-resize':'nesw-resize')}:undefined} onPointerDown={canResizeOutline?e=>startOutlineBoxResize(e,i):undefined}>
                 {canResizeOutline&&<rect x={x-10/zoom} y={y-10/zoom} width={20/zoom} height={20/zoom} fill="transparent"/>}
                 <rect x={x-4/zoom} y={y-4/zoom} width={8/zoom} height={8/zoom} rx={1/zoom} fill="#fffdf1" stroke="#5d7e48" strokeWidth="1.6" vectorEffect="non-scaling-stroke" pointerEvents="none"/>
@@ -784,7 +801,7 @@ function App() {
     {modal==='invite'&&<Modal title="A little company?" eyebrow="GOOD HOMES HAVE ROOM FOR FRIENDS" onClose={closeModal}><p>Invite someone to slow down, stay a while, and make a little memory.</p>{role==='owner'?<><label className="form-label">Give your friend a little freedom<select value={inviteRole} onChange={e=>{setInviteRole(e.target.value);setInviteLink('');}}><option value="viewer">Visitor — wander & enjoy</option><option value="decorator">Decorator — make it cozy together</option><option value="builder">Builder — dream & build together</option></select></label><button className="button primary full-width" onClick={createInvite} disabled={busy}>{busy?<LoaderCircle size={17} className="spin"/>:<Link size={17}/>}Make an invitation<Copy size={16}/></button>{inviteLink&&<label className="form-label invite-link-label">A link to your little place · valid for 7 days<input readOnly aria-label="Invitation link" value={inviteLink} onFocus={e=>e.target.select()}/></label>}<div className="public-setting"><span><DoorOpen size={21}/><span><strong>Leave the door open</strong><small>Let neighbors visit and look around.</small></span></span><button className={`toggle ${access.public?'on':''}`} role="switch" aria-checked={access.public} aria-label="Allow neighborhood visitors" onClick={()=>updateAccess({public:!access.public})}><span/></button></div>{access.collaborators.length>0&&<div className="collaborators"><h3>People with a little key</h3>{access.collaborators.map(p=><div className="collaborator" key={p.id}><span className="mini-avatar" style={{background:p.color}}>•ᴗ•</span><span>{p.name}</span><select aria-label={`Permission for ${p.name}`} value={p.role} onChange={e=>updateAccess({playerId:p.id,role:e.target.value})}><option value="viewer">Visitor</option><option value="decorator">Decorator</option><option value="builder">Builder</option><option value="remove">Remove access</option></select></div>)}</div>}</>:<div className="visitor-notice"><ShieldCheck size={28}/><h3>You’re a welcome {role==='viewer'?'visitor':role}.</h3><p>Only the homeowner can make invitations and change who has a key.</p></div>}<span className="modal-footnote"><LockKeyhole size={12}/>Your home. Your people. Your choice.</span></Modal>}
     {modal==='upload'&&<StickerDialog busy={busy} processing={removeBg&&(cutoutBusy||!!upload&&upload.processedStrength!==cutoutStrength)} strength={cutoutStrength} onStrength={setCutoutStrength} src={removeBg?upload?.processed:upload?.original} name={upload?.name||''} removeBg={removeBg} onRemoveBg={setRemoveBg} onName={name=>setUpload(u=>({...u,name}))} cancel={closeModal} save={saveUpload}/>}
     {editingStickerId&&home.custom.some(s=>s.id===editingStickerId)&&<StickerDialog renaming src={home.custom.find(s=>s.id===editingStickerId).src} name={editingStickerName} onName={setEditingStickerName} cancel={()=>setEditingStickerId(null)} save={saveStickerRename}/>}
-    {modal==='help'&&<Modal title="A little guide to feeling at home." eyebrow="THERE’S NO WRONG WAY TO MAKE IT YOURS" wide onClose={closeModal}><div className="help-grid"><div><Hammer/><h3>Dream it. Draw it.</h3><p>Build straight walls or draw freeform curves. Use Home outline for a new floor shape. Select a wall to move it or drag its endpoints.</p></div><div><Armchair/><h3>A few favorite things.</h3><p>Click or drag a piece from the collection. Select it to resize, rotate, flip, layer, or lock it. Your changes save as you go.</p></div><div><DoorOpen/><h3>Settle right in.</h3><p>Switch to Explore. Wander with WASD or arrow keys. Walk up to a chair, your bed, or a little treasure, then press E.</p></div><div><Users/><h3>Better together.</h3><p>Invite a friend with a visitor, decorator, or builder pass. Open the same link on another device to walk and decorate together.</p></div></div><div className="help-note"><ShieldCheck size={19}/><p>Your home is linked to this browser. Keep your browser data to return to it. Use a backup to keep a personal copy.</p></div><button className="button secondary full-width" onClick={exportHome}><Download size={17}/>Keep a backup of my home</button></Modal>}
+    {modal==='help'&&<Modal title="A little guide to feeling at home." eyebrow="THERE’S NO WRONG WAY TO MAKE IT YOURS" wide onClose={closeModal}><div className="help-grid"><div><Hammer/><h3>Dream it. Draw it.</h3><p>Build a straight divider, or place a curved divider as a line and bend it with three points. Select a divider to move it independently. Use Home outline for the floor shape.</p></div><div><Armchair/><h3>A few favorite things.</h3><p>Click or drag a piece from the collection. Select it to resize, rotate, flip, layer, or lock it. Your changes save as you go.</p></div><div><DoorOpen/><h3>Settle right in.</h3><p>Switch to Explore. Wander with WASD or arrow keys. Walk up to a chair, your bed, or a little treasure, then press E.</p></div><div><Users/><h3>Better together.</h3><p>Invite a friend with a visitor, decorator, or builder pass. Open the same link on another device to walk and decorate together.</p></div></div><div className="help-note"><ShieldCheck size={19}/><p>Your home is linked to this browser. Keep your browser data to return to it. Use a backup to keep a personal copy.</p></div><button className="button secondary full-width" onClick={exportHome}><Download size={17}/>Keep a backup of my home</button></Modal>}
     {modal==='room'&&<Modal title="Your own cozy corner." eyebrow="A LITTLE PLACE TO JUST BE" onClose={closeModal}><p>{home.description}</p><div className="room-stats"><span><strong>{home.items.length}</strong>favorite things</span><span><strong>{home.walls.length}</strong>little walls</span><span><strong>{players.length}</strong>at home</span></div><p className="room-quote">“A home isn’t simply given to you.<br/>You make it yours.”</p><button className="button secondary full-width" onClick={()=>{setModal(null);openNeighborhood();}}><DoorOpen size={17}/>Meet the neighborhood<ArrowRight size={16}/></button></Modal>}
   </div>;
 }

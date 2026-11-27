@@ -2,6 +2,7 @@ import { CATALOG, distanceToSegment, extendDivider, floorOutlines, furnitureVisu
 import {stairBounds} from './stairs.js';
 import {objectFloorLevel} from './floors.js';
 import {reorderObjects} from './layers.js';
+import {dividerControls,dividerPolylines,withDividerPoints} from './dividers.js';
 
 export const emptySelection=()=>({boundary:false,sections:[],walls:[],items:[],openings:[],stairs:[]});
 export const selectionCount=s=>Number(s.boundary)+(s.sections?.length||0)+s.walls.length+s.items.length+s.openings.length+(s.stairs?.length||0);
@@ -37,7 +38,7 @@ export function selectInBox(home,rect,mode='build'){
   if(mode==='build'){
     if(home.sections?.length)s.sections=home.sections.filter(s=>s.points.every(p=>contains(rect,p))).map(s=>s.id);
     else s.boundary=home.boundary.length>2&&home.boundary.every(p=>contains(rect,p));
-    s.walls=home.walls.filter(w=>w.points.some((p,i)=>i>0&&segmentMeetsBox(w.points[i-1],p,rect))).map(w=>w.id);
+    s.walls=home.walls.filter(w=>dividerPolylines(w).some(path=>path.some((p,i)=>i>0&&segmentMeetsBox(path[i-1],p,rect)))).map(w=>w.id);
     s.openings=home.openings.filter(o=>contains(rect,o)).map(o=>o.id);
   }
   s.items=home.items.filter(i=>!i.locked&&contains(rect,i)).map(i=>i.id);
@@ -49,7 +50,7 @@ export function selectionBounds(home,s,mode='build'){
   const points=[];
   if(s.boundary)points.push(...home.boundary);
   for(const section of getSections(home))if(s.sections?.includes(section.id))points.push(...section.points);
-  for(const w of home.walls)if(s.walls.includes(w.id))points.push(...w.points);
+  for(const w of home.walls)if(s.walls.includes(w.id))points.push(...dividerPolylines(w).flat());
   for(const o of home.openings)if(s.openings.includes(o.id))points.push(o);
   for(const stair of home.stairs||[])if(s.stairs?.includes(stair.id)){
     const b=stairBounds(stair,{decorated:mode!=='build'}),r=(stair.rotation||0)*Math.PI/180,scale=stair.scale||1;
@@ -64,15 +65,6 @@ export function selectionBounds(home,s,mode='build'){
   const minX=Math.min(...points.map(p=>p.x)),maxX=Math.max(...points.map(p=>p.x));
   const minY=Math.min(...points.map(p=>p.y)),maxY=Math.max(...points.map(p=>p.y));
   return {x:minX-12,y:minY-12,width:maxX-minX+24,height:maxY-minY+24};
-}
-function constrainToOriginalBoundary(point,original,home){
-  let closest=null;
-  for(const boundary of [...floorOutlines(home),...(home.holes||[])])for(let i=0;i<boundary.length;i++){
-    const a=boundary[i],b=boundary[(i+1)%boundary.length];if(distanceToSegment(original,a,b)>.1)continue;
-    const dx=b.x-a.x,dy=b.y-a.y,t=Math.max(0,Math.min(1,((point.x-a.x)*dx+(point.y-a.y)*dy)/(dx*dx+dy*dy||1)));
-    const projected={x:a.x+t*dx,y:a.y+t*dy},distance=Math.hypot(point.x-projected.x,point.y-projected.y);
-    if(!closest||distance<closest.distance)closest={projected,distance};
-  }return closest?.projected||point;
 }
 // A generated join becomes an ordinary divider as soon as it is edited.
 // Preserve every piece of that seam before suppressing its generated version.
@@ -90,38 +82,39 @@ export function setWallThickness(home,id,value){
 }
 export function moveSelection(home,s,delta){
   home=withFloorOrigins(home);
-if(s.boundary)return {...home,boundary:home.boundary.map(p=>shifted(p,delta)),sections:getSections(home).map(section=>({...section,points:section.points.map(p=>shifted(p,delta))})),outlines:floorOutlines(home).map(r=>r.map(p=>shifted(p,delta))),holes:(home.holes||[]).map(r=>r.map(p=>shifted(p,delta))),walls:home.walls.map(w=>({...w,points:w.points.map(p=>shifted(p,delta))})),stairs:(home.stairs||[]).map(i=>shifted(i,delta)),items:home.items.map(i=>shifted(i,delta)),openings:home.openings.map(o=>shifted(o,delta)),...(home.roomDecor?{roomDecor:home.roomDecor.map(r=>shifted(r,delta))}:{})};
+if(s.boundary)return {...home,boundary:home.boundary.map(p=>shifted(p,delta)),sections:getSections(home).map(section=>({...section,points:section.points.map(p=>shifted(p,delta))})),outlines:floorOutlines(home).map(r=>r.map(p=>shifted(p,delta))),holes:(home.holes||[]).map(r=>r.map(p=>shifted(p,delta))),walls:home.walls.map(w=>withDividerPoints(w,w.points.map(p=>shifted(p,delta)))),stairs:(home.stairs||[]).map(i=>shifted(i,delta)),items:home.items.map(i=>shifted(i,delta)),openings:home.openings.map(o=>shifted(o,delta)),...(home.roomDecor?{roomDecor:home.roomDecor.map(r=>shifted(r,delta))}:{})};
   if(s.sections?.length)return transformFloorSections(home,s.sections,p=>shifted(p,delta),true);
   home=detachJoins(home,s.walls);
-  const movedNodes=[];
-  for(const w of home.walls)if(s.walls.includes(w.id))for(const p of w.points)movedNodes.push({from:p,to:constrainToOriginalBoundary(shifted(p,delta),p,home)});
-  const moveNode=p=>movedNodes.find(n=>same(n.from,p))?.to||p;
   const moveObject=i=>({...shifted(i,delta),level:objectFloorLevel(home,i)});
-  return {...home,walls:home.walls.map(w=>({...w,points:w.points.map(moveNode)})),stairs:(home.stairs||[]).map(i=>s.stairs?.includes(i.id)?moveObject(i):i),items:home.items.map(i=>s.items.includes(i.id)?moveObject(i):i),openings:home.openings.map(o=>{
+  return {...home,walls:home.walls.map(w=>s.walls.includes(w.id)?withDividerPoints(w,w.points.map(p=>shifted(p,delta))):w),stairs:(home.stairs||[]).map(i=>s.stairs?.includes(i.id)?moveObject(i):i),items:home.items.map(i=>s.items.includes(i.id)?moveObject(i):i),openings:home.openings.map(o=>{
     if(s.openings.includes(o.id))return shifted(o,delta);
-    const wall=home.walls.find(w=>s.walls.includes(w.id)&&w.points.some((p,i)=>i>0&&distanceToSegment(o,w.points[i-1],p)<1));
+    const wall=home.walls.find(w=>s.walls.includes(w.id)&&dividerPolylines(w).some(path=>path.some((p,i)=>i>0&&distanceToSegment(o,path[i-1],p)<1&&Math.abs(Math.sin(Math.atan2(p.y-path[i-1].y,p.x-path[i-1].x)-(o.angle||0)*Math.PI/180))<.15)));
     return wall?shifted(o,delta):o;
   })};
 }
 export function moveVertex(home,wallId,index,target){
   home=withFloorOrigins(home);
   const sectionId=wallId.startsWith('section:')?wallId.slice(8):null;
-  const original=sectionId?getSections(home).find(s=>s.id===sectionId)?.points[index]:wallId==='boundary'?home.boundary[index]:home.walls.find(w=>w.id===wallId)?.points[index];
+  const selected=home.walls.find(w=>w.id===wallId);
+  const controls=selected?.curved?dividerControls(selected):selected?.points;
+  const original=sectionId?getSections(home).find(s=>s.id===sectionId)?.points[index]:wallId==='boundary'?home.boundary[index]:controls?.[index];
   if(!original)return home;
   if(!sectionId&&wallId!=='boundary'){
     home=detachJoins(home,[wallId]);
-    let constrained=constrainToOriginalBoundary(target,original,home);
-    const wall=home.walls.find(w=>w.id===wallId);
-    if(index===0||index===wall.points.length-1){
-      const draft={...wall,points:wall.points.map((p,i)=>i===index?constrained:p)};
+    let constrained={...target};
+    const wall=home.walls.find(w=>w.id===wallId),points=wall.curved?dividerControls(wall):wall.points;
+    if(index===0||index===points.length-1){
+      const draft=withDividerPoints(wall,points.map((p,i)=>i===index?constrained:p));
+      if(wall.curved)draft.curveMode='three-point';
       constrained=extendDivider(home,draft,{indices:[index]}).points[index];
     }
-    const replace=p=>same(p,original)?{...constrained}:p;
-    return {...home,walls:home.walls.map(w=>({...w,points:w.points.map(replace)})),openings:home.openings.map(o=>same(o,original)?{...o,...constrained}:o)};
+    const edited=withDividerPoints(wall,points.map((p,i)=>i===index?constrained:p));
+    if(wall.curved)edited.curveMode='three-point';
+    return {...home,walls:home.walls.map(w=>w.id===wallId?edited:w)};
   }
   const replace=p=>same(p,original)?{x:target.x,y:target.y}:p;
   const sections=getSections(home).map(s=>({...s,points:(!sectionId||s.id===sectionId)?s.points.map(replace):s.points}));
-  const changed={...home,sections,boundary:home.boundary.map(replace),walls:home.walls.map(w=>({...w,points:w.points.map(replace)})),openings:home.openings.map(o=>same(o,original)?{...o,...target}:o)};
+  const changed={...home,sections,boundary:home.boundary.map(replace),walls:home.walls.map(w=>withDividerPoints(w,w.points.map(replace))),openings:home.openings.map(o=>same(o,original)?{...o,...target}:o)};
   return sectionId?normalizePlan(changed):changed;
 }
 const belongs=(p,section)=>pointInPolygon(p,section.points)||section.points.some((a,i)=>distanceToSegment(p,a,section.points[(i+1)%section.points.length])<.1);
@@ -135,7 +128,7 @@ function transformFloorSections(home,ids,transform,snap=false){
   // Carry belongings with the selected section; generated seams are rebuilt
   // from the new layout rather than dragged as loose wall objects.
   const movePoint=p=>{const section=chosen.find(s=>belongs(p,s))||(p.id&&!originals.some(s=>belongs(p,s))?chosen.find(s=>s.level===objectFloorLevel(home,p)):null);if(!section)return p;const before=transform(section.points[0]),after=transformed.find(s=>s.id===section.id).points[0],q=transform(p);return {...p,x:q.x+after.x-before.x,y:q.y+after.y-before.y};};
-  return normalizePlan({...home,sections:[...stationary,...moved],walls:home.walls.filter(w=>w.source!=='join').map(w=>({...w,points:w.points.map(movePoint)})),stairs:(home.stairs||[]).map(movePoint),items:home.items.map(movePoint),openings:home.openings.map(movePoint),...(home.roomDecor?{roomDecor:home.roomDecor.map(movePoint)}:{})});
+  return normalizePlan({...home,sections:[...stationary,...moved],walls:home.walls.filter(w=>w.source!=='join').map(w=>withDividerPoints(w,w.points.map(movePoint))),stairs:(home.stairs||[]).map(movePoint),items:home.items.map(movePoint),openings:home.openings.map(movePoint),...(home.roomDecor?{roomDecor:home.roomDecor.map(movePoint)}:{})});
 }
 export function outlineBounds(boundary){
   if(!boundary.length)return null;
@@ -221,7 +214,7 @@ export function resizeOutline(home,corner,target,{proportional=false,sectionId=n
   else{sx=Math.max(20/b.width,sx);sy=Math.max(20/b.height,sy);}
   const transform=p=>({...p,x:anchor.x+(p.x-anchor.x)*sx,y:anchor.y+(p.y-anchor.y)*sy});
   if(ids)return transformFloorSections(home,ids,transform);
-  return {...home,boundary:home.boundary.map(transform),sections:getSections(home).map(s=>({...s,points:s.points.map(transform)})),outlines:floorOutlines(home).map(r=>r.map(transform)),holes:(home.holes||[]).map(r=>r.map(transform)),walls:home.walls.map(w=>({...w,points:w.points.map(transform)})),stairs:(home.stairs||[]).map(transform),items:home.items.map(transform),openings:home.openings.map(o=>({...transform(o),angle:Math.atan2(Math.sin((o.angle||0)*Math.PI/180)*sy,Math.cos((o.angle||0)*Math.PI/180)*sx)*180/Math.PI})),...(home.roomDecor?{roomDecor:home.roomDecor.map(transform)}:{})};
+  return {...home,boundary:home.boundary.map(transform),sections:getSections(home).map(s=>({...s,points:s.points.map(transform)})),outlines:floorOutlines(home).map(r=>r.map(transform)),holes:(home.holes||[]).map(r=>r.map(transform)),walls:home.walls.map(w=>withDividerPoints(w,w.points.map(transform))),stairs:(home.stairs||[]).map(transform),items:home.items.map(transform),openings:home.openings.map(o=>({...transform(o),angle:Math.atan2(Math.sin((o.angle||0)*Math.PI/180)*sy,Math.cos((o.angle||0)*Math.PI/180)*sx)*180/Math.PI})),...(home.roomDecor?{roomDecor:home.roomDecor.map(transform)}:{})};
 }
 
 // Exact lengths use the same geometry as dragging. Horizontal/vertical edges
@@ -243,9 +236,8 @@ export function setPlanMeasurement(home,measurement,metres){
     if(!wall||!same(wall.points[0],a)||!same(wall.points.at(-1),b))return fail('The wall changed. Click its measurement again.');
     const points=wall.points.map(transform);
     if(points.some(p=>!Number.isFinite(p.x)||!Number.isFinite(p.y)||Math.abs(p.x)>=10000||Math.abs(p.y)>=10000))return fail('That size is outside the drawing area.');
-    const replace=p=>{const index=wall.points.findIndex(q=>same(p,q));return index<0?p:{...points[index]};};
-    const onWall=p=>wall.points.some((q,i)=>i>0&&distanceToSegment(p,wall.points[i-1],q)<1);
-    next=normalizePlan({...home,walls:home.walls.map(w=>({...w,points:w.id===wall.id?points:w.points.map(replace)})),openings:home.openings.map(o=>onWall(o)?transform(o):o)});
+    const onWall=p=>dividerPolylines(wall).some(path=>path.some((q,i)=>i>0&&distanceToSegment(p,path[i-1],q)<1));
+    next=normalizePlan({...home,walls:home.walls.map(w=>w.id===wall.id?withDividerPoints(w,points):w),openings:home.openings.map(o=>onWall(o)?transform(o):o)});
     const edited=next.walls.find(w=>w.id===wall.id);
     if(!edited||Math.abs(Math.hypot(edited.points.at(-1).x-edited.points[0].x,edited.points.at(-1).y-edited.points[0].y)-target)>.1)return fail('That length does not fit inside this floor plan.');
   }else{

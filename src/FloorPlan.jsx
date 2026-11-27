@@ -7,6 +7,7 @@ import {LevelLabels} from './LevelLabels.jsx';
 import {StairObject} from './Stairs.jsx';
 import {orderedObjects} from './layers.js';
 import { combineDoorPairs, combineNearbyWindows, roomOpenings, roomWallEdges } from './roomWalls.js';
+import {dividerControls,dividerPath,dividerPolylines,withDividerPoints} from './dividers.js';
 
 const linePath = points => points.length ? 'M' + points.map(p => `${p.x},${p.y}`).join(' L') : '';
 
@@ -34,10 +35,10 @@ export function findRooms(home) {
   const step=10,minX=Math.floor(Math.min(...allPoints.map(p=>p.x))/step)*step,minY=Math.floor(Math.min(...allPoints.map(p=>p.y))/step)*step;
   const cols=Math.ceil((Math.max(...allPoints.map(p=>p.x))-minX)/step),rows=Math.ceil((Math.max(...allPoints.map(p=>p.y))-minY)/step);
   if(cols*rows>15000)return [{...homeSpawn(home),area:planArea(home.boundary)}];
-  const cells=new Uint8Array(cols*rows);
+  const cells=new Uint8Array(cols*rows),wallPaths=home.walls.flatMap(dividerPolylines);
   for(let y=0;y<rows;y++)for(let x=0;x<cols;x++){
     const p={x:minX+x*step+step/2,y:minY+y*step+step/2};
-    if(!pointInHome(p,home)||home.walls.some(w=>w.points.some((a,i)=>i>0&&distanceToSegment(p,w.points[i-1],a)<8)))cells[y*cols+x]=1;
+    if(!pointInHome(p,home)||wallPaths.some(path=>path.some((a,i)=>i>0&&distanceToSegment(p,path[i-1],a)<8)))cells[y*cols+x]=1;
   }
   const rooms=[];
   for(let n=0;n<cells.length;n++){
@@ -82,10 +83,10 @@ export function FloorEdgeTargets({home,onResize}){
     })}{outlineCornerControls(floor.ring).map(({point,control,index,cursor})=><path key={`corner-${index}`} className="floor-corner-resize-hit" d={`M${point.x},${point.y}h.01`} fill="none" stroke="transparent" strokeWidth="20" strokeLinecap="round" vectorEffect="non-scaling-stroke" pointerEvents="stroke" style={{cursor:gameCursor(cursor)}} aria-label="Resize whole floor diagonally" onPointerDown={e=>onResize(e,{sectionIds,control,index,level:floor.level})}/>)}</g>;
   })}</g>;
 }
-export function FloorPlan({ home: savedHome, preview, selectedWall, selection, onWallDown, onBoundaryDown, onOpeningDown, onStairDown, onItemDown, onDimensionEdit, showObjects=true,showGrid,hideLevelLabels=false }) {
+export function FloorPlan({ home: savedHome, preview, selectedWall, selection, onWallDown, onBoundaryDown, onOpeningDown, onStairDown, onItemDown, onDimensionEdit, showObjects=true,showGrid,hideLevelLabels=false,dividerEditable=true }) {
   const home=preview?.home||savedHome;
   const boundary=preview?.wallId==='boundary'?preview.points:home.boundary;
-  const walls=home.walls.map(w=>w.id===preview?.wallId?{...w,points:preview.points}:w);
+  const walls=home.walls.map(w=>w.id===preview?.wallId?withDividerPoints(w,preview.points):w);
   const rooms=useMemo(()=>findRooms({...home,boundary,walls}),[home.boundary,home.walls,preview]);
   const alignedOpenings=useMemo(()=>roomOpenings({...home,boundary,walls},roomWallEdges({...home,boundary,walls})),[home,boundary,walls]);
   const renderedOpenings=useMemo(()=>combineDoorPairs(combineNearbyWindows(alignedOpenings)),[alignedOpenings]);
@@ -104,24 +105,21 @@ export function FloorPlan({ home: savedHome, preview, selectedWall, selection, o
       <g className="joined-wall-network" fill="none" strokeLinejoin="round" strokeLinecap="round" pointerEvents="none">
         <g className="wall-outlines" stroke="#7e8b70">
           <path data-testid="joined-plan-walls" className="exterior-wall-outline" d={outline} strokeWidth="12"/>
-          {walls.map(w=><path key={w.id} className="divider-wall-outline" d={w.curved?smoothPath(w.points):linePath(w.points)} strokeWidth={Math.max(3,Number(w.thickness)||7)}/>)}
+          {walls.map(w=><path key={w.id} className="divider-wall-outline" d={dividerPath(w)} strokeWidth={Math.max(3,Number(w.thickness)||7)}/>)}
         </g>
         <g className="wall-centers" stroke="#fffef5">
           <path className="exterior-wall-center" d={outline} strokeWidth="4"/>
-          {walls.map(w=><path key={w.id} className="divider-wall-center" d={w.curved?smoothPath(w.points):linePath(w.points)} strokeWidth={Math.max(1,Math.max(3,Number(w.thickness)||7)-4.5)}/>)}
+          {walls.map(w=><path key={w.id} className="divider-wall-center" d={dividerPath(w)} strokeWidth={Math.max(1,Math.max(3,Number(w.thickness)||7)-4.5)}/>)}
         </g>
       </g>
       {sections.map(section=><path key={section.id} className="plan-section-hit plan-outer-wall" data-section-id={section.id} d={linePath(section.points)+' Z'} fill="transparent" stroke="transparent" strokeWidth="18" onPointerDown={e=>onBoundaryDown(e,{kind:'body',sectionId:section.id})}/>)}
       {dimensionRings.map((ring,ri)=>{const signed=ring.reduce((s,p,i)=>{const n=ring[(i+1)%ring.length];return s+p.x*n.y-n.x*p.y;},0);return ring.map((a,i)=>{const b=ring[(i+1)%ring.length],start=signed>=0?a:b,end=signed>=0?b:a;return ellipse&&i>1?null:<Dimension key={`${ri}-${i}`} a={start} b={end} onEdit={onDimensionEdit?e=>editLength(e,start,end):undefined}/>;});})}
       {rooms.map((room,i)=><g className="plan-room-label" key={i} transform={`translate(${room.x} ${room.y})`} pointerEvents="none"><text textAnchor="middle" y="-4" fontSize="10" fontWeight="600" letterSpacing="2">{`ROOM ${String(i+1).padStart(2,'0')}`}</text><text textAnchor="middle" y="15" fontSize="10" opacity=".65">{room.area.toFixed(1)} m²</text></g>)}
     </>}
-    {walls.map(w=>{const d=w.curved?smoothPath(w.points):linePath(w.points);return <g key={w.id} className="plan-divider" data-wall-id={w.id}>
+    {walls.map(w=>{const d=dividerPath(w);return <g key={w.id} className="plan-divider" data-wall-id={w.id}>
+      <title>{w.curved?'Curved divider — drag either end or the middle point to reshape.':'Divider — select and drag to move independently.'} Click a crossing again to select the other divider.</title>
       <path className="divider-body-hit" d={d} fill="none" stroke="transparent" strokeWidth="22" pointerEvents="stroke" onPointerDown={e=>onWallDown(e,w)}/>
-      {selectedWall===w.id&&<Dimension a={w.points[0]} b={w.points.at(-1)} offset={24} onEdit={onDimensionEdit?e=>editLength(e,w.points[0],w.points.at(-1),w.id):undefined}/>}
-      {[0,w.points.length-1].map(i=><g key={i}>
-        <circle className="divider-end-hit" data-wall-end={i===0?'start':'end'} cx={w.points[i].x} cy={w.points[i].y} r="9" fill="transparent" onPointerDown={e=>onWallDown(e,w,i)}/>
-        {selectedWall===w.id&&<rect className="plan-vertex" x={w.points[i].x-4.5} y={w.points[i].y-4.5} width="9" height="9" rx="2" fill="#fffdf0" stroke="#80986a" strokeWidth="1.5" pointerEvents="none"/>}
-      </g>)}
+      {dividerEditable&&selectedWall===w.id&&<><path d={d} fill="none" stroke="#6e9852" strokeWidth="2" pointerEvents="none"/><Dimension a={w.points[0]} b={w.points.at(-1)} offset={24} onEdit={onDimensionEdit?e=>editLength(e,w.points[0],w.points.at(-1),w.id):undefined}/></>}
     </g>;})}
       {renderedOpenings.map(o=>{const span=o.windowSpan||o.doorSpan||42;return <g key={o.id} className={`plan-opening plan-${o.type} ${o.doorSpan>42?'double-door':''}`} transform={`translate(${o.x} ${o.y}) rotate(${o.angle||0})`} onPointerDown={e=>onOpeningDown(e,o)}><path d={`M-${span/2} 0h${span}`} stroke="#fbfaf2" strokeWidth="15"/>{o.type==='door'?o.doorSpan>42?<g fill="none" stroke="#8b997a" strokeWidth="1.2"><path d="M-42 0v-40M42 0v-40" strokeWidth="2.4"/><path d="M-42-40A40 40 0 0 1 0 0M42-40A40 40 0 0 0 0 0" strokeDasharray="3 2"/><path d="M-44-7v14M44-7v14" stroke="#65715b" strokeWidth="2.5"/></g>:<g fill="none" stroke="#8b997a" strokeWidth="1.2"><path d="M-20 0v-40" strokeWidth="2.4"/><path d="M-20-40A40 40 0 0 1 20 0" strokeDasharray="3 2"/><path d="M-22-7v14M22-7v14" stroke="#65715b" strokeWidth="2.5"/></g>:<path className="window-line" d={`M-${span/2} 0h${span}`} fill="none" stroke="#7e8b70" strokeWidth="1.6"/>}</g>;})}
       <g className="plan-opening-hit-targets" pointerEvents="none">
@@ -130,6 +128,10 @@ export function FloorPlan({ home: savedHome, preview, selectedWall, selection, o
         </g>)}
       </g>
     {showObjects&&orderedObjects(home,{useLayers:false}).map(({kind,object})=>kind==='stair'?<StairObject key={object.id} stair={object} onPointerDown={onStairDown}/>:<PlanFurniture key={object.id} item={object} home={home} onPointerDown={onItemDown}/>)}
+    {dividerEditable&&walls.filter(w=>w.id===selectedWall).map(w=><g key={`controls-${w.id}`} className="divider-controls">{dividerControls(w).map((p,i)=>{
+      const index=w.curved?i:i===0?0:w.points.length-1;
+      return <g key={i}><circle className="divider-end-hit" data-wall-end={i===0?'start':w.curved&&i===1?'middle':'end'} cx={p.x} cy={p.y} r="11" fill="transparent" onPointerDown={e=>onWallDown(e,w,index)}/><circle className="plan-vertex" cx={p.x} cy={p.y} r="5" fill="#fffdf0" stroke="#5d7e48" strokeWidth="1.8" pointerEvents="none"/></g>;
+    })}</g>)}
     {!hideLevelLabels&&<LevelLabels home={home}/>}
   </g>;
 }

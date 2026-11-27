@@ -1,5 +1,6 @@
 import clipping from 'polygon-clipping';
 import {distanceToSegment,floorOutlines,getSections,pointInPolygon,homeSpawn,canMove} from './model.js';
+import {dividerPolylines} from './dividers.js';
 
 export const ringContains=(ring,p)=>pointInPolygon(p,ring)||ring.some((a,i)=>distanceToSegment(p,a,ring[(i+1)%ring.length])<.2);
 export function floorDescriptors(home){
@@ -93,7 +94,7 @@ export function floorHome(home,floor){
   return {...home,...home.levelDecor?.[floor.level],level:floor.level,boundary:floor.ring,outlines:[floor.ring],floorLevels:[floor.level],
     sections:(home.sections||[]).filter(s=>s.level===floor.level||s.level==null&&s.points.some(p=>ringContains(floor.ring,p))),
     holes:(home.holes||[]).filter(r=>r.some(p=>ringContains(floor.ring,p))),
-    walls:home.walls.filter(w=>w.points.some((b,i)=>i>0&&ringContains(floor.ring,{x:(b.x+w.points[i-1].x)/2,y:(b.y+w.points[i-1].y)/2}))),
+    walls:home.walls.flatMap(w=>{const paths=dividerPolylines(w).filter(path=>path.some((b,i)=>i>0&&ringContains(floor.ring,{x:(b.x+path[i-1].x)/2,y:(b.y+path[i-1].y)/2})));return paths.length?[{...w,paths}]:[];}),
     openings:home.openings.filter(owns),items:home.items.filter(ownsObject),stairs:(home.stairs||[]).filter(ownsObject)};
 }
 export function stackLayers(home,level){

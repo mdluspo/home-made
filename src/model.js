@@ -1,5 +1,6 @@
 import polygonClipping from 'polygon-clipping';
 import {validateDesign} from './design.js';
+import {dividerControls,dividerId,dividerPoints,dividerPolylines} from './dividers.js';
 
 export const CATALOG = [
   { type: 'sofa', name: 'Sofa', category: 'Furniture', color: '#a9b68c', tag: 'A soft place to land', w: 180, h: 140 },
@@ -178,7 +179,7 @@ function segmentCross(a,b,c,d) {
 export function extendDivider(home,wall,{indices=null,tolerance=18}={}){
   if(wall.points.length<2)return wall;
   const rings=[...floorOutlines(home),...(home.holes||[])];
-  const barriers=[...rings.map(r=>[...r,r[0]]),...home.walls.filter(w=>w.id!==wall.id).map(w=>w.points)];
+  const barriers=[...rings.map(r=>[...r,r[0]]),...home.walls.filter(w=>w.id!==wall.id).flatMap(dividerPolylines)];
   const extend=(end,neighbor)=>{
     if(barriers.some(ps=>ps.some((p,i)=>i>0&&distanceToSegment(end,ps[i-1],p)<.1)))return end;
     const length=Math.hypot(end.x-neighbor.x,end.y-neighbor.y);
@@ -198,14 +199,19 @@ export function extendDivider(home,wall,{indices=null,tolerance=18}={}){
     return hits[0]?.point||end;
   };
   const points=wall.points.map(p=>({...p}));
-  const firstNeighbor=points.find(p=>!closePoint(p,points[0]));
-  const lastNeighbor=[...points].reverse().find(p=>!closePoint(p,points.at(-1)));
+  const sampled=dividerPoints(wall);
+  const firstNeighbor=sampled.find(p=>!closePoint(p,points[0]));
+  const lastNeighbor=[...sampled].reverse().find(p=>!closePoint(p,points.at(-1)));
   if(firstNeighbor&&(!indices||indices.includes(0)))points[0]=extend(wall.points[0],firstNeighbor);
   if(lastNeighbor&&(!indices||indices.includes(points.length-1)))points[points.length-1]=extend(wall.points.at(-1),lastNeighbor);
   return {...wall,points};
 }
 export function addDivider(home,wall){
-  return normalizePlan({...home,walls:[...home.walls,extendDivider(home,wall)]});
+  const controls=wall.curveMode==='three-point'?dividerControls(wall):null;
+  const straight=controls&&distanceToSegment(controls[1],controls[0],controls[2])<.05;
+  const placed=extendDivider(home,wall);
+  if(straight){const a=placed.points[0],b=placed.points.at(-1);placed.points=[a,{x:(a.x+b.x)/2,y:(a.y+b.y)/2},b];}
+  return normalizePlan({...home,walls:[...home.walls,placed]});
 }
 function clipPolyline(points,boundary,holes=[]) {
   const pieces=[];let active=[];
@@ -228,30 +234,35 @@ function clipPolyline(points,boundary,holes=[]) {
   if(active.length>1)pieces.push(active);
   return pieces;
 }
-function mergeCollinearWalls(source){
-  const result=[...source];
-  for(let i=0;i<result.length;i++){
-    const wall=result[i];if(wall.curved||wall.points.length!==2)continue;
-    let again=true;
-    while(again){again=false;
-      const [a,b]=wall.points,dx=b.x-a.x,dy=b.y-a.y,length=Math.hypot(dx,dy);if(length<.01)break;
-      for(let j=i+1;j<result.length;j++){
-        const other=result[j];if(other.curved||other.points.length!==2||other.source!==wall.source||(Number(other.thickness)||7)!==(Number(wall.thickness)||7))continue;
-        const [c,d]=other.points;
-        if(Math.abs((c.x-a.x)*dy-(c.y-a.y)*dx)/length>.05||Math.abs((d.x-a.x)*dy-(d.y-a.y)*dx)/length>.05)continue;
-        const t=p=>((p.x-a.x)*dx+(p.y-a.y)*dy)/(length*length),tc=t(c),td=t(d),lo=Math.min(tc,td),hi=Math.max(tc,td);
-        if(lo>1+.05/length||hi<-.05/length)continue;
-        if(Math.min(1,hi)-Math.max(0,lo)<.05/length){
-          const join=lerpPoint(a,b,lo>=1-.05/length?1:0);
-          if(result.some((third,k)=>k!==i&&k!==j&&third.points.some(p=>closePoint(p,join))&&third.points.some(p=>Math.abs((p.x-a.x)*dy-(p.y-a.y)*dx)/length>.05)))continue;
-        }
-        wall.points=[lerpPoint(a,b,Math.min(0,lo)),lerpPoint(a,b,Math.max(1,hi))];result.splice(j,1);again=true;break;
-      }
+// Recover the identity of dividers saved by the old crossing-split format.
+// Only pieces of the SAME placed object are joined; neighboring walls remain
+// independent even when they happen to be collinear.
+function restoreDividerWalls(source){
+  const groups=new Map();
+  for(const wall of source){const id=dividerId(wall);if(!groups.has(id))groups.set(id,[]);groups.get(id).push(wall);}
+  return [...groups].flatMap(([id,members])=>{
+    const chains=[];
+    for(const wall of members){
+      const points=wall.points.map(p=>({...p}));
+      if(chains.some(chain=>chain.length===points.length&&chain.every((p,i)=>closePoint(p,points[i]))))continue;
+      chains.push(points);
     }
-  }return result;
+    for(let i=0;i<chains.length;i++)for(let j=i+1;j<chains.length;){
+      let a=chains[i],b=chains[j],merged=null;
+      if(closePoint(a.at(-1),b[0]))merged=[...a,...b.slice(1)];
+      else if(closePoint(a.at(-1),b.at(-1)))merged=[...a,...b.slice(0,-1).reverse()];
+      else if(closePoint(a[0],b.at(-1)))merged=[...b,...a.slice(1)];
+      else if(closePoint(a[0],b[0]))merged=[...b].reverse().concat(a.slice(1));
+      if(merged){chains[i]=merged;chains.splice(j,1);j=i+1;}else j++;
+    }
+    return chains.map((points,i)=>{
+      const wall={...members[0],id:i?`${id}~part${i}`:id,points:members[0].curved?points:points.filter((p,k)=>!k||k===points.length-1||distanceToSegment(p,points[k-1],points[k+1])>.05)};
+      return wall.curveMode==='three-point'?{...wall,points:dividerControls(wall)}:wall;
+    });
+  });
 }
-// Walls belong to the plan: trim exterior portions and turn crossings into
-// shared endpoints. The same resulting geometry drives rooms and collisions.
+// Persist one editable divider, not one object per crossing. Clipped paths
+// supply the same floor-contained geometry to rendering and collisions.
 export function normalizePlan(home) {
   // Upper floors may overhang lower ones. Never rescale user geometry or its
   // belongings; discard only warnings left by the previous auto-fit behavior.
@@ -270,29 +281,17 @@ export function normalizePlan(home) {
   }
   if(!home.sections.length)return {...home,walls:[],openings:[]};
   const rings=[...home.outlines,...home.holes];
-  const source=[...home.walls.filter(w=>w.source!=='join'),...joins];
-  const clipped=mergeCollinearWalls(source.flatMap(w=>home.outlines.flatMap((outline,ri)=>clipPolyline(w.points,outline,home.holes).map((points,i)=>({...w,id:i||ri?`${w.id}~clip${ri}-${i}`:w.id,points})))).filter(w=>!w.points.slice(1).every((q,j)=>rings.some(ring=>ring.some((a,i)=>{const b=ring[(i+1)%ring.length];return distanceToSegment(w.points[j],a,b)<.05&&distanceToSegment(q,a,b)<.05;})))));
-  const cuts=clipped.map(w=>w.points.slice(1).map(()=>[]));
-  for(let i=0;i<clipped.length;i++)for(let j=i+1;j<clipped.length;j++){
-    const a=clipped[i].points,b=clipped[j].points;
-    for(let ai=1;ai<a.length;ai++)for(let bi=1;bi<b.length;bi++){
-      const hit=segmentCross(a[ai-1],a[ai],b[bi-1],b[bi]);if(!hit)continue;
-      if(hit.t>1e-6&&hit.t<1-1e-6)cuts[i][ai-1].push(hit.t);
-      if(hit.u>1e-6&&hit.u<1-1e-6)cuts[j][bi-1].push(hit.u);
-    }
-  }
-  const walls=[];
-  clipped.forEach((wall,wi)=>{
-    let active=[wall.points[0]],part=0;
-    const push=()=>{if(active.length>1&&active.some(p=>!closePoint(p,active[0]))){walls.push({...wall,id:part?`${wall.id}~split${part}`:wall.id,points:active});part++;}};
-    for(let i=1;i<wall.points.length;i++){
-      const sorted=[...new Set(cuts[wi][i-1].map(t=>Math.round(t*1e8)/1e8))].sort((a,b)=>a-b);
-      for(const t of sorted){const p=lerpPoint(wall.points[i-1],wall.points[i],t);active.push(p);push();active=[p];}
-      active.push(wall.points[i]);
-    }
-    push();
+  const source=[...restoreDividerWalls(home.walls.filter(w=>w.source!=='join')),...joins];
+  const walls=source.flatMap(w=>{
+    const sampled=dividerPoints(w);
+    const paths=home.outlines.flatMap(outline=>clipPolyline(sampled,outline,home.holes)).map(path=>path.filter((p,i)=>!i||!closePoint(p,path[i-1]))).filter(path=>path.length>1&&!path.slice(1).every((q,j)=>rings.some(ring=>ring.some((a,i)=>{const b=ring[(i+1)%ring.length];return distanceToSegment(path[j],a,b)<.05&&distanceToSegment(q,a,b)<.05;}))));
+    if(!paths.length)return [];
+    // Straight endpoints retract to the floor; curved objects retain exactly
+    // their three editable controls even when their arc needs clipping.
+    const points=!w.curved&&paths.length===1?paths[0]:w.points;
+    return [{...w,points,paths}];
   });
-  const edges=[...walls.map(w=>w.points),...rings.map(r=>[...r,r[0]])];
+  const edges=[...walls.flatMap(dividerPolylines),...rings.map(r=>[...r,r[0]])];
   const alignedOpenings=home.openings.filter(o=>edges.some(ps=>ps.some((p,i)=>i>0&&distanceToSegment(o,ps[i-1],p)<14))).map(opening=>{
     if(edges.some(ps=>ps.some((p,i)=>i>0&&distanceToSegment(opening,ps[i-1],p)<.001)))return opening;
     let best=null;
@@ -352,8 +351,8 @@ export function distanceToSegment(p, a, b) {
 export function canMove(point, home) {
   if (!pointInHome(point, home)) return false;
   for (const wall of home.walls) {
-    for (let i = 1; i < wall.points.length; i++) {
-      if (distanceToSegment(point, wall.points[i - 1], wall.points[i]) < 9) {
+    for(const path of dividerPolylines(wall))for (let i = 1; i < path.length; i++) {
+      if (distanceToSegment(point, path[i - 1], path[i]) < 9) {
         if (!home.openings.some(o => o.type === 'door' && o.open && Math.hypot(o.x - point.x, o.y - point.y) < 28)) return false;
       }
     }
@@ -401,6 +400,7 @@ export function validateHome(home) {
   if(home.floorOrigins!==undefined&&(!home.floorOrigins||typeof home.floorOrigins!=='object'||Array.isArray(home.floorOrigins)||Object.keys(home.floorOrigins).length>50||Object.entries(home.floorOrigins).some(([n,p])=>!Number.isSafeInteger(Number(n))||Number(n)<1||!point(p))))return false;
   if(home.floorFitWarnings!==undefined&&(!Array.isArray(home.floorFitWarnings)||home.floorFitWarnings.length>50||!home.floorFitWarnings.every(w=>w&&Number.isSafeInteger(w.level)&&w.level>0&&Number.isSafeInteger(w.belowLevel)&&w.belowLevel>0)))return false;
   if (!home.walls.every(w => typeof w.id === 'string' && Array.isArray(w.points) && w.points.length >= 2 && w.points.length <= 2000 && w.points.every(point))) return false;
+  if(home.walls.some(w=>(w.curveMode!==undefined&&w.curveMode!=='three-point')||(w.curveMode==='three-point'&&(!w.curved||w.points.length!==3))||(w.paths!==undefined&&(!Array.isArray(w.paths)||w.paths.length>200||w.paths.some(path=>!Array.isArray(path)||path.length<2||path.length>10000||!path.every(point))))))return false;
   if (!Array.isArray(home.custom) || home.custom.length > 50 || !home.custom.every(c => typeof c.id === 'string' && typeof c.name === 'string' && /^data:image\/(png|jpeg|webp);base64,/.test(c.src) && c.src.length < 3000000)) return false;
   return validateDesign(home)&&home.items.every(i => typeof i.id === 'string' && (CATALOG.some(c => c.type === i.type) || home.custom.some(c => c.id === i.type)) && point(i) && finite(i.rotation) && finite(i.scale) && i.scale > 0 && i.scale <= 3);
 }

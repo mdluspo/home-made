@@ -3,6 +3,8 @@ import { initialHome, migrateHome, normalizePlan } from './model.js';
 import {linkFloorBlueprints} from './floors.js';
 import { recordHistory, travelHistory } from './history.js';
 
+const receivedHome=state=>linkFloorBlueprints(normalizePlan(migrateHome(state)));
+
 export function useWorld(notify) {
   const [home, setHome] = useState(initialHome);
   const [profile, setProfile] = useState(null);
@@ -67,7 +69,7 @@ export function useWorld(notify) {
           const msg = JSON.parse(e.data);
           if (msg.type === 'home') {
             const recovering = pending.current || inFlight.current;
-            const received=linkFloorBlueprints(normalizePlan(migrateHome(msg.state)));
+            const received=receivedHome(msg.state);
             if(joinedHome.current!==msg.homeId||(!recovering&&JSON.stringify(received)!==JSON.stringify(currentHome.current)))updateHistory({past:[],future:[]});
             joinedHome.current=msg.homeId;
             version.current = msg.version; inFlight.current = null;
@@ -79,17 +81,17 @@ export function useWorld(notify) {
             version.current = msg.version;
             if (msg.clientId === clientId.current) {
               inFlight.current = null;
-              if (!pending.current) { applyHome(msg.state); setStatus('Saved'); }
+              if (!pending.current) { applyHome(receivedHome(msg.state)); setStatus('Saved'); }
               flush();
             } else {
-              applyHome(msg.state); setStatus('Saved');
+              applyHome(receivedHome(msg.state)); setStatus('Saved');
               if (pending.current || inFlight.current) { pending.current = null; inFlight.current = null; notifyRef.current('Your friend made a change at the same moment. Their latest room is now synced.'); }
               updateHistory({ past: [], future: [] });
             }
           }
           if (msg.type === 'conflict') {
             version.current = msg.version; pending.current = null; inFlight.current = null;
-            applyHome(msg.state); setStatus('Saved'); updateHistory({ past: [], future: [] });
+            applyHome(receivedHome(msg.state)); setStatus('Saved'); updateHistory({ past: [], future: [] });
             notifyRef.current('The room changed while you were editing. You’re all caught up — try that change again.');
           }
           if (msg.type === 'presence') setPlayers(msg.players);

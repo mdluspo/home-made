@@ -1,5 +1,6 @@
 import clipping from 'polygon-clipping';
 import {distanceToSegment,floorOutlines} from './model.js';
+import {dividerPolylines} from './dividers.js';
 
 export const WALL_HEIGHT=70,CUTAWAY_HEIGHT=0;
 const EPS=.00001;
@@ -207,16 +208,39 @@ export function roomWallEdges(home){
     }
     return {...p};
   };
-  const interior=[];
-  for(const wall of home.walls)wall.points.slice(1).forEach((b,i)=>interior.push({a:alignedPoint(wall.points[i]),b:alignedPoint(b),planA:wall.points[i],planB:b,height:WALL_HEIGHT,exterior:false,thickness:Math.max(3,Number(wall.thickness)||7),wallId:wall.id}));
+  const raw=[];
+  for(const wall of home.walls)for(const path of dividerPolylines(wall))path.slice(1).forEach((b,i)=>raw.push({a:alignedPoint(path[i]),b:alignedPoint(b),planA:path[i],planB:b,height:WALL_HEIGHT,exterior:false,thickness:Math.max(3,Number(wall.thickness)||7),wallId:wall.id,terminalA:i===0,terminalB:i===path.length-2,curved:wall.curved}));
+  // Build's thick strokes can meet without their centre lines being exact.
+  // Close only those visible endpoint contacts, along the wall's own tangent,
+  // before projection; otherwise a tiny plan join becomes a tall open seam.
+  const hosts=[...edges,...raw];
+  const contacts=raw.map(edge=>{
+    const endpoint=(p,q,terminal)=>{
+      if(!terminal)return p;
+      let best=p,distance=Infinity;
+      const dx=p.x-q.x,dy=p.y-q.y;
+      for(const other of hosts){
+        if(other===edge||other.wallId===edge.wallId)continue;
+        const ox=other.b.x-other.a.x,oy=other.b.y-other.a.y,cross=dx*oy-dy*ox;
+        if(Math.abs(cross)<EPS)continue;
+        const t=((other.a.x-p.x)*oy-(other.a.y-p.y)*ox)/cross,u=((other.a.x-p.x)*dy-(other.a.y-p.y)*dx)/cross;
+        if(u<0||u>1)continue;
+        const reach=Math.abs(t)*Math.hypot(dx,dy),limit=Math.min((edge.thickness+other.thickness)/2,Math.hypot(dx,dy)*.4);
+        if(reach<=limit&&reach<distance){best={x:p.x+t*dx,y:p.y+t*dy};distance=reach;}
+      }
+      return best;
+    };
+    return {...edge,a:endpoint(edge.a,edge.b,edge.terminalA),b:endpoint(edge.b,edge.a,edge.terminalB)};
+  });
+  const interior=splitRenderEdges(contacts);
   // Short connector pieces inherit the actual straight line of their long
   // neighbor instead of making square-cap bumps at the join.
   for(const edge of interior){
     const length=Math.hypot(edge.b.x-edge.a.x,edge.b.y-edge.a.y);
-    if(length>=12||length<.001)continue;
+    if(edge.curved||length>=12||length<.001)continue;
     const source=interior.find(other=>{
       const dx=other.b.x-other.a.x,dy=other.b.y-other.a.y,l=Math.hypot(dx,dy);
-      return l>=48&&Math.abs((edge.b.x-edge.a.x)*dy-(edge.b.y-edge.a.y)*dx)/(length*l)<.005&&Math.min(Math.hypot(edge.a.x-other.a.x,edge.a.y-other.a.y),Math.hypot(edge.a.x-other.b.x,edge.a.y-other.b.y),Math.hypot(edge.b.x-other.a.x,edge.b.y-other.a.y),Math.hypot(edge.b.x-other.b.x,edge.b.y-other.b.y))<.25;
+      return !other.curved&&l>=48&&Math.abs((edge.b.x-edge.a.x)*dy-(edge.b.y-edge.a.y)*dx)/(length*l)<.005&&Math.min(Math.hypot(edge.a.x-other.a.x,edge.a.y-other.a.y),Math.hypot(edge.a.x-other.b.x,edge.a.y-other.b.y),Math.hypot(edge.b.x-other.a.x,edge.b.y-other.a.y),Math.hypot(edge.b.x-other.b.x,edge.b.y-other.b.y))<.25;
     });
     if(!source)continue;
     const dx=source.b.x-source.a.x,dy=source.b.y-source.a.y,l=dx*dx+dy*dy;
@@ -239,6 +263,29 @@ export function roomWallEdges(home){
     }
   }
   return valid;
+}
+
+// Crossings exist in the mesh, never as separately selectable saved walls.
+function splitRenderEdges(edges){
+  const cuts=edges.map(()=>[0,1]);
+  for(let i=0;i<edges.length;i++)for(let j=0;j<i;j++){
+    const {a,b}=edges[i],{a:c,b:d}=edges[j];
+    if(Math.max(a.x,b.x)<Math.min(c.x,d.x)-EPS||Math.max(c.x,d.x)<Math.min(a.x,b.x)-EPS||Math.max(a.y,b.y)<Math.min(c.y,d.y)-EPS||Math.max(c.y,d.y)<Math.min(a.y,b.y)-EPS)continue;
+    const dx=b.x-a.x,dy=b.y-a.y,ox=d.x-c.x,oy=d.y-c.y,cross=dx*oy-dy*ox;
+    if(Math.abs(cross)<EPS)continue;
+    const t=((c.x-a.x)*oy-(c.y-a.y)*ox)/cross,u=((c.x-a.x)*dy-(c.y-a.y)*dx)/cross;
+    if(t<-EPS||t>1+EPS||u<-EPS||u>1+EPS)continue;
+    if(t>EPS&&t<1-EPS)cuts[i].push(t);
+    if(u>EPS&&u<1-EPS)cuts[j].push(u);
+  }
+  const at=(a,b,t)=>({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t});
+  return edges.flatMap((edge,i)=>{
+    const times=[...new Set(cuts[i].map(t=>Math.round(t*1e9)/1e9))].sort((a,b)=>a-b);
+    return times.slice(1).flatMap((t,k)=>{
+      const before=times[k],a=at(edge.a,edge.b,before),b=at(edge.a,edge.b,t);
+      return Math.hypot(b.x-a.x,b.y-a.y)>.01?[{...edge,a,b,planA:at(edge.planA,edge.planB,before),planB:at(edge.planA,edge.planB,t)}]:[];
+    });
+  });
 }
 
 // A plan stroke can visibly meet a junction even when its endpoint is a few
@@ -266,25 +313,86 @@ function decorateWallEdges(planEdges){
     };
     return {...edge,a:endpoint(edge.a),b:endpoint(edge.b)};
   });
-  return aligned.map(edge=>{
+  return registerCutawayRuns(aligned);
+}
+
+// Build splits a straight wall at crossings. Register the complete straight
+// run before moving any of its points: moving only the final split creates a
+// kink. Crossings are then intersections of the registered supporting lines,
+// so both walls keep straight sides and share exactly the same displayed node.
+function registerCutawayRuns(edges){
+  const parent=edges.map((_,i)=>i);
+  const root=i=>{while(parent[i]!==i){parent[i]=parent[parent[i]];i=parent[i];}return i;};
+  for(let i=0;i<edges.length;i++){
+    const edge=edges[i];if(edge.exterior)continue;
+    const dx=edge.b.x-edge.a.x,dy=edge.b.y-edge.a.y,length=Math.hypot(dx,dy);
+    for(let j=0;j<i;j++){
+      const other=edges[j];if(other.exterior||other.height!==edge.height)continue;
+      const ox=other.b.x-other.a.x,oy=other.b.y-other.a.y;
+      if(Math.abs(dx*oy-dy*ox)>.0001*length*Math.hypot(ox,oy))continue;
+      if(Math.min(distanceToSegment(edge.a,other.a,other.b),distanceToSegment(edge.b,other.a,other.b),distanceToSegment(other.a,edge.a,edge.b),distanceToSegment(other.b,edge.a,edge.b))>.05)continue;
+      parent[root(i)]=root(j);
+    }
+  }
+  const groups=new Map();
+  edges.forEach((edge,i)=>{const key=root(i);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(edge);});
+  const runs=[...groups.values()].map(members=>{
+    const first=members[0],dx=first.b.x-first.a.x,dy=first.b.y-first.a.y,length=Math.hypot(dx,dy),ux=dx/length,uy=dy/length;
+    const points=members.flatMap(e=>[e.a,e.b]).sort((a,b)=>(a.x-b.x)*ux+(a.y-b.y)*uy);
+    return {members,a:points[0],b:points[points.length-1],exterior:first.exterior};
+  });
+  const anchors=[];
+  for(const run of runs){
+    run.displayA=run.a;run.displayB=run.b;
+    const dx=run.b.x-run.a.x,dy=run.b.y-run.a.y;
+    if(run.exterior||Math.min(Math.abs(dx),Math.abs(dy))<.005*Math.hypot(dx,dy))continue;
+    for(const end of ['a','b']){
+      const p=run[end],front=edges.find(e=>e.height===CUTAWAY_HEIGHT&&distanceToSegment(p,e.a,e.b)<.05);
+      if(!front)continue;
+      const shared=edges.some(other=>{
+        if(run.members.includes(other)||other.height!==WALL_HEIGHT||distanceToSegment(p,other.a,other.b)>.05)return false;
+        const ox=other.b.x-other.a.x,oy=other.b.y-other.a.y;
+        return Math.abs(dx*oy-dy*ox)>.005*Math.hypot(dx,dy)*Math.hypot(ox,oy);
+      });
+      if(!shared)continue;
+      let anchor=anchors.find(node=>Math.hypot(node.source.x-p.x,node.source.y-p.y)<.05);
+      if(!anchor){anchor={source:p,point:{x:p.x,y:p.y+WALL_HEIGHT-front.thickness/2}};anchors.push(anchor);}
+      run[end==='a'?'displayA':'displayB']=anchor.point;run.anchored=true;
+    }
+  }
+  if(!anchors.length)return edges;
+  const owner=new Map(runs.flatMap(run=>run.members.map(edge=>[edge,run])));
+  const intersection=(one,two)=>{
+    const a=one.displayA,b=one.displayB,c=two.displayA,d=two.displayB;
+    const dx=b.x-a.x,dy=b.y-a.y,ox=d.x-c.x,oy=d.y-c.y,cross=dx*oy-dy*ox;
+    if(Math.abs(cross)<.0001*Math.hypot(dx,dy)*Math.hypot(ox,oy))return null;
+    const t=((c.x-a.x)*oy-(c.y-a.y)*ox)/cross;
+    return {x:a.x+t*dx,y:a.y+t*dy};
+  };
+  const nodes=[];
+  const registered=(p,run)=>{
+    const anchor=anchors.find(node=>Math.hypot(node.source.x-p.x,node.source.y-p.y)<.05);
+    // Axis-aligned returns still finish at their actual floor-plan border;
+    // only the diagonal runs use the lowered cap anchor at that same node.
+    if(anchor)return {...(run.anchored?anchor.point:p)};
+    const cached=nodes.find(node=>Math.hypot(node.source.x-p.x,node.source.y-p.y)<.05);
+    if(cached)return {...cached.point};
+    const others=runs.filter(other=>other!==run&&other.members.some(edge=>distanceToSegment(p,edge.a,edge.b)<.05));
+    // Prefer the existing host of a T junction; ordinary crossings have two
+    // supporting lines and both incident runs get their exact intersection.
+    others.sort((a,b)=>Number(b.exterior)-Number(a.exterior));
+    let point=null;
+    for(const other of others){point=intersection(run,other);if(point)break;}
+    if(!point){
+      const dx=run.b.x-run.a.x,dy=run.b.y-run.a.y,t=((p.x-run.a.x)*dx+(p.y-run.a.y)*dy)/(dx*dx+dy*dy);
+      point={x:run.displayA.x+t*(run.displayB.x-run.displayA.x),y:run.displayA.y+t*(run.displayB.y-run.displayA.y)};
+    }
+    nodes.push({source:p,point});return {...point};
+  };
+  return edges.map(edge=>{
     if(edge.exterior)return edge;
-    const dx=edge.b.x-edge.a.x,dy=edge.b.y-edge.a.y;
-    if(Math.min(Math.abs(dx),Math.abs(dy))<.005*Math.hypot(dx,dy))return edge;
-    const anchor=p=>{
-      const front=aligned.find(e=>e.height===CUTAWAY_HEIGHT&&distanceToSegment(p,e.a,e.b)<.05);
-      if(!front)return {point:p,anchored:false};
-      const upright=aligned.some(e=>e!==edge&&e.height===WALL_HEIGHT&&Math.abs(e.b.x-e.a.x)<=Math.abs(e.b.y-e.a.y)*.005&&distanceToSegment(p,e.a,e.b)<.05);
-      // A free divider ending along the front already uses a flush cutaway
-      // continuation. This rule is for the actual corner shared with a side
-      // wall, where continuing sideways would put it in the neighboring room.
-      if(!upright)return {point:p,anchored:false};
-      // The thin top edge must meet the INSIDE of the low front border, not
-      // a floating point one wall-height above it. Move the whole displayed
-      // run (including its base), then extrude uniformly; do not taper height.
-      return {point:{x:p.x,y:p.y+WALL_HEIGHT-front.thickness/2},anchored:true};
-    };
-    const a=anchor(edge.a),b=anchor(edge.b);
-    return a.anchored||b.anchored?{...edge,a:a.point,b:b.point,cutawayAnchored:true}:edge;
+    const run=owner.get(edge);
+    return {...edge,a:registered(edge.a,run),b:registered(edge.b,run),...(run.anchored?{cutawayAnchored:true}:{})};
   });
 }
 
